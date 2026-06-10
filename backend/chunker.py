@@ -31,6 +31,10 @@ def fixed_size_chunking(text: str, chunk_size: int = 512, overlap: int = 50) -> 
             
     return chunks
 
+def paragraph_chunking(text: str) -> List[str]:
+    """Splits text by double newlines, filtering out empty chunks."""
+    return [c.strip() for c in text.split('\n\n') if c.strip()]
+
 def sentence_aware_chunking(text: str, max_words: int = 512) -> List[str]:
     """Splits text without cutting sentences in half."""
     sentences = nltk.tokenize.sent_tokenize(text)
@@ -146,6 +150,8 @@ def semantic_chunking(paragraphs: List[str], threshold: float = 0.3) -> List[str
 def apply_chunking(text_or_elements, strategy="sentence", **kwargs):
     if strategy == "fixed":
         return fixed_size_chunking(text_or_elements, **kwargs)
+    elif strategy == "paragraph":
+        return paragraph_chunking(text_or_elements)
     elif strategy == "sentence":
         return sentence_aware_chunking(text_or_elements, **kwargs)
     elif strategy == "heading":

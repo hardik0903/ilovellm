@@ -48,7 +48,7 @@ const ResearchAssistant = () => {
         const file = new File([scrapeData.data.extracted_text || scrapeData.data.context.map(c => c.text).join('\n') || "Empty Document"], 'url.txt', { type: 'text/plain' });
         formData.append('file', file);
       }
-      formData.append('chunking_strategy', 'semantic');
+      formData.append('chunking_strategy', 'paragraph');
       
       const ingestRes = await fetch('http://localhost:8000/api/ingest-advanced', {
         method: 'POST',

@@ -471,7 +471,7 @@ async def research_query(req: ResearchQueryRequest):
 
     # 1. Initial Retrieval
     initial_res = collection.query(
-        query_texts=[req.query], n_results=2, where={"document_id": req.document_id}
+        query_texts=[req.query], n_results=3, where={"document_id": req.document_id}
     )
     docs = initial_res.get("documents", [[]])[0]
     metas = initial_res.get("metadatas", [[]])[0]
@@ -488,29 +488,27 @@ async def research_query(req: ResearchQueryRequest):
     if gap_text.upper().startswith("NO"):
         missing_query = gap_text[3:].strip()
         sec_res = collection.query(
-            query_texts=[missing_query], n_results=1, where={"document_id": req.document_id}
+            query_texts=[missing_query], n_results=2, where={"document_id": req.document_id}
         )
-        # Append unique chunks (max 3 total to save CPU time)
+        # Append unique chunks (max 4 total to save CPU time)
         existing_docs = set(docs)
         for d, m in zip(sec_res.get("documents", [[]])[0], sec_res.get("metadatas", [[]])[0]):
-            if d not in existing_docs and len(docs) < 3:
+            if d not in existing_docs and len(docs) < 4:
                 docs.append(d)
                 metas.append(m)
                 existing_docs.add(d)
 
     # 4. Synthesize
-    syn_prompt = f"""You are a strict AI Researcher. Answer the user's query based ONLY on the evidence below.
-You MUST output YOUR ENTIRE RESPONSE as a valid JSON object exactly like this:
-{{
-  "answer": "Your detailed answer",
-  "evidence": "Exact quotes from the text",
-  "citations": "Chunk X, Page Y",
-  "confidence": "High/Medium/Low",
-  "abstain_reason": "If you cannot answer it, explain why here. Otherwise empty string."
-}}
+    syn_prompt = f"""You are an AI Researcher answering a query based ONLY on the evidence below.
+Do NOT use outside knowledge. Do not hallucinate.
+If the evidence does not contain the answer, reply "Not found in the paper."
 
-If the evidence does NOT contain the answer, you MUST set "answer" to "Not found in the paper." and fill "abstain_reason".
-Do NOT output anything outside the JSON block.
+Format your response exactly like this:
+ANSWER:
+<your answer here>
+
+EVIDENCE:
+<exact quote from the text>
 
 Evidence Context:
 {format_context(docs, metas)}
@@ -522,22 +520,20 @@ User Query: {req.query}"""
     )
     raw_output = syn_res["output"]
     
-    # 5. Validate / Parse JSON
-    parsed_json = None
-    try:
-        match = re.search(r'(\{.*?\})', raw_output.replace('\n', ''), re.DOTALL)
-        if match:
-            parsed_json = json.loads(match.group(1))
-        else:
-            parsed_json = json.loads(raw_output)
-    except Exception:
-        parsed_json = {
-            "answer": raw_output,
-            "evidence": "N/A",
-            "citations": "N/A",
-            "confidence": "Low",
-            "abstain_reason": "Failed to parse structured output."
-        }
+    # 5. Validate / Parse Text format
+    answer_match = re.search(r'ANSWER:\s*(.*?)(?:EVIDENCE:|$)', raw_output, re.DOTALL | re.IGNORECASE)
+    evidence_match = re.search(r'EVIDENCE:\s*(.*)', raw_output, re.DOTALL | re.IGNORECASE)
+    
+    ans_text = answer_match.group(1).strip() if answer_match else raw_output.strip()
+    ev_text = evidence_match.group(1).strip() if evidence_match else "N/A"
+    
+    parsed_json = {
+        "answer": ans_text,
+        "evidence": ev_text,
+        "citations": "Retrieved Context",
+        "confidence": "High" if "Not found" not in ans_text else "Low",
+        "abstain_reason": "Not found in evidence." if "Not found" in ans_text else ""
+    }
         
     return {"success": True, "data": parsed_json, "interrogation_passes": 2 if gap_text.upper().startswith("NO") else 1}
 
