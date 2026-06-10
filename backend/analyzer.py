@@ -3,59 +3,172 @@ import json
 import numpy as np
 from typing import Dict, Any, List
 
-def check_suitability(df: pd.DataFrame, input_col: str, output_col: str) -> Dict[str, Any]:
+def run_baselines(df: pd.DataFrame, input_col: str, output_col: str, execution_mode: str) -> Dict[str, Any]:
     """
-    Analyzes the dataset to recommend the best machine learning approach.
+    Phase 2: Baseline Engine
+    Quickly tests the cheapest solutions before committing to heavy fine-tuning.
+    Returns baseline metrics and a recommendation to skip training if baseline is strong.
     """
-    total_rows = len(df)
+    df_sample = df.head(min(100, len(df)))
     
-    # If the dataset is too small
-    if total_rows < 50:
+    if execution_mode == "classifier":
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.model_selection import cross_val_score
+            
+            vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+            X = vectorizer.fit_transform(df_sample[input_col].astype(str))
+            y = df_sample[output_col].astype(str)
+            
+            # Require at least 2 classes with at least 2 samples each for cross_val
+            if len(y.unique()) > 1 and min(y.value_counts()) >= 2:
+                model = LogisticRegression(max_iter=100)
+                scores = cross_val_score(model, X, y, cv=min(3, min(y.value_counts())))
+                accuracy = scores.mean()
+                
+                return {
+                    "baseline_method": "LogisticRegression + TF-IDF",
+                    "accuracy_score": float(accuracy),
+                    "is_sufficient": bool(accuracy > 0.90),
+                    "message": f"Baseline classifier achieved {accuracy*100:.1f}% accuracy on a sample."
+                }
+        except Exception as e:
+            pass
+            
+    elif execution_mode == "lora_sft":
         return {
-            "task_type": "Too few samples",
-            "best_option": "Prompt Engineering",
-            "fine_tuning_needed": False,
-            "reason": "You have less than 50 examples. Try using few-shot prompting with a strong base model instead of fine-tuning."
-        }
-        
-    # Check output characteristics
-    unique_outputs = df[output_col].nunique()
-    avg_output_len = df[output_col].astype(str).str.len().mean()
-    
-    # Check if outputs look like JSON
-    sample_outputs = df[output_col].dropna().head(10).astype(str).tolist()
-    looks_like_json = any(s.strip().startswith('{') and s.strip().endswith('}') for s in sample_outputs)
-    
-    if looks_like_json:
-        return {
-            "task_type": "Structured Extraction",
-            "best_option": "JSON Structured Output Fine-Tuning",
-            "fine_tuning_needed": True,
-            "reason": "The output expects structured JSON data. Fine-tuning a model to generate reliable schema-conforming JSON is highly recommended."
-        }
-        
-    if unique_outputs <= 30 and avg_output_len < 100:
-        return {
-            "task_type": "Classification",
-            "best_option": "Supervised Classifier",
-            "fine_tuning_needed": False,
-            "reason": f"Output is one of {unique_outputs} fixed labels. A lightweight classifier or embeddings-based search is often faster and cheaper than full LLM fine-tuning."
-        }
-        
-    if avg_output_len > 500:
-        return {
-            "task_type": "Long-form Generation",
-            "best_option": "Retrieval-Augmented Generation (RAG) + Light Fine-Tuning",
-            "fine_tuning_needed": "Maybe",
-            "reason": "Outputs are very long. Consider using RAG to fetch context rather than relying purely on the model's parametric memory."
+            "baseline_method": "Zero-shot Prompting",
+            "accuracy_score": None,
+            "is_sufficient": False,
+            "message": "Generative tasks usually require fine-tuning to perfectly match your specific format/tone. A zero-shot baseline is assumed to be suboptimal."
         }
         
     return {
-        "task_type": "Instruction / Chat",
-        "best_option": "Supervised Fine-Tuning (SFT)",
-        "fine_tuning_needed": True,
-        "reason": "The data follows a conversational or instruction-response format. SFT is the standard approach to teach the model your specific tone and format."
+        "baseline_method": "Heuristic Rules",
+        "accuracy_score": None,
+        "is_sufficient": False,
+        "message": "No fast baseline could confidently solve this task."
     }
+
+def generate_training_plan(df: pd.DataFrame, input_col: str, output_col: str) -> Dict[str, Any]:
+    """
+    Intelligent Task Router: Analyzes the dataset and generates a strict execution plan.
+    Enforces hard routing rules to prevent unnecessary LLM fine-tuning.
+    """
+    total_rows = len(df)
+    quality_flags = []
+    
+    # 1. Dataset Readiness Gate
+    df = df.dropna(subset=[input_col, output_col])
+    valid_rows = len(df)
+    if total_rows - valid_rows > 0:
+        quality_flags.append(f"Dropped {total_rows - valid_rows} rows with missing values.")
+        
+    df['output_len'] = df[output_col].astype(str).str.len()
+    avg_output_len = df['output_len'].mean()
+    unique_outputs = df[output_col].nunique()
+    
+    # Check for imbalance
+    if unique_outputs > 1 and unique_outputs <= 20:
+        val_counts = df[output_col].value_counts()
+        if val_counts.max() > (val_counts.min() * 10):
+            quality_flags.append("Severe class imbalance detected.")
+            
+    # Default Budget
+    budget = {
+        "max_rows": min(valid_rows, 10000),
+        "max_epochs": 3,
+        "max_time_mins": 60
+    }
+            
+    # 2. Hard Routing Rules
+    
+    # Rule A: Too little data
+    if valid_rows < 50:
+        return {
+            "task_type": "few_shot_prompting",
+            "execution_mode": "no_train",
+            "recommended_approach": "Prompt Engineering",
+            "confidence": 0.98,
+            "should_train": False,
+            "estimated_time": "0 mins",
+            "estimated_cost": "$0.00",
+            "dataset_quality_flags": quality_flags + ["Dataset is too small for reliable fine-tuning."],
+            "reasoning": f"You only have {valid_rows} valid examples. LLMs require hundreds of examples to learn format reliably. Use few-shot prompting instead.",
+            "budget_limits": budget
+        }
+        
+    # Rule B: Structured Data Extraction (JSON)
+    sample_outputs = df[output_col].head(10).astype(str).tolist()
+    looks_like_json = any(s.strip().startswith('{') and s.strip().endswith('}') for s in sample_outputs)
+    if looks_like_json:
+        return {
+            "task_type": "structured_extraction",
+            "execution_mode": "extractor",
+            "recommended_approach": "Schema Extractor Model",
+            "confidence": 0.92,
+            "should_train": True,
+            "estimated_time": "5-10 mins",
+            "estimated_cost": "$0.05",
+            "dataset_quality_flags": quality_flags,
+            "reasoning": "Output is formatted as JSON. We will route this to a lightweight schema-extraction model rather than a conversational LLM.",
+            "budget_limits": budget
+        }
+        
+    # Rule C: Classification (Fixed labels)
+    if unique_outputs <= 30 and avg_output_len < 100:
+        return {
+            "task_type": "classification",
+            "execution_mode": "classifier",
+            "recommended_approach": "Small Classifier (scikit-learn / XGBoost)",
+            "confidence": 0.95,
+            "should_train": True,
+            "estimated_time": "< 1 min",
+            "estimated_cost": "$0.00",
+            "dataset_quality_flags": quality_flags,
+            "reasoning": f"Output consists of {unique_outputs} fixed categories. A small classifier is 100x faster and more accurate than LLM fine-tuning for this task.",
+            "budget_limits": budget
+        }
+        
+    # Rule D: Retrieval / RAG (Very long outputs)
+    if avg_output_len > 1000:
+        return {
+            "task_type": "document_qa",
+            "execution_mode": "rag",
+            "recommended_approach": "Retrieval-Augmented Generation (RAG)",
+            "confidence": 0.88,
+            "should_train": False,
+            "estimated_time": "0 mins (Indexing time varies)",
+            "estimated_cost": "$0.00",
+            "dataset_quality_flags": quality_flags + ["Outputs are extremely long."],
+            "reasoning": "The target outputs are very long documents. Fine-tuning models to memorize long text is inefficient; use RAG to index and retrieve this knowledge.",
+            "budget_limits": budget
+        }
+        
+    # Rule E: Conversational / Instruction Tuning
+    plan = {
+        "task_type": "instruction_tuning",
+        "execution_mode": "lora_sft",
+        "recommended_approach": "LoRA Supervised Fine-Tuning",
+        "confidence": 0.85,
+        "should_train": True,
+        "estimated_time": "1-4 hours (CPU)",
+        "estimated_cost": "Local CPU",
+        "dataset_quality_flags": quality_flags,
+        "reasoning": "Data follows a conversational instruction-response pattern with sufficient volume. Suitable for LoRA fine-tuning.",
+        "budget_limits": budget
+    }
+    
+    # 3. Baseline Checker
+    baselines = run_baselines(df, input_col, output_col, plan["execution_mode"])
+    plan["baseline_results"] = baselines
+    
+    if baselines.get("is_sufficient", False):
+        plan["should_train"] = False
+        plan["reasoning"] += f" However, training is NOT recommended because the baseline ({baselines['baseline_method']}) is already extremely strong."
+        
+    return plan
 
 def analyze_quality(df: pd.DataFrame, input_col: str, output_col: str) -> Dict[str, Any]:
     """

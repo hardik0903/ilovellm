@@ -254,19 +254,19 @@ async def finetune_analyze(
 ):
     try:
         import pandas as pd
-        from analyzer import check_suitability, analyze_quality
+        from analyzer import generate_training_plan, analyze_quality
         
         if filepath.endswith('.csv'):
             df = pd.read_csv(filepath)
         else:
             df = pd.read_json(filepath, lines=filepath.endswith('.jsonl'))
             
-        suitability = check_suitability(df, input_col, output_col)
+        training_plan = generate_training_plan(df, input_col, output_col)
         quality = analyze_quality(df, input_col, output_col)
         
         return {
             "success": True,
-            "suitability": suitability,
+            "training_plan": training_plan,
             "quality": quality
         }
     except Exception as e:
@@ -324,60 +324,54 @@ async def finetune_label(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/finetune/start")
-async def finetune_start(
+@app.post("/api/finetune/execute")
+async def finetune_execute(
     filepath: str = Form(...),
     input_col: str = Form(...),
     output_col: str = Form(...),
-    model_id: str = Form("HuggingFaceTB/SmolLM-360M-Instruct"),
-    batch_size: int = Form(1),
-    lr: float = Form(2e-4),
-    epochs: int = Form(1),
-    lora_rank: int = Form(8),
-    target_format: str = Form("chatml"),
-    use_eval: bool = Form(True)
+    plan_json: str = Form(...)  # User passes back the approved plan JSON string
 ):
     try:
-        # 1. Prepare Dataset
-        dataset = prepare_dataset(filepath, input_col, output_col, target_format)
+        import json
+        from queue_manager import enqueue_job
         
-        # 2. Start Background Training
-        output_dir = f"./models/adapters/{model_id.split('/')[-1]}_custom"
-        start_lora_training_cpu(
-            dataset=dataset,
-            model_id=model_id,
-            batch_size=batch_size,
-            lr=lr,
-            epochs=epochs,
-            lora_rank=lora_rank,
-            output_dir=output_dir,
-            use_eval=use_eval
-        )
+        plan = json.loads(plan_json)
         
-        # Cleanup temp file
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        if not plan.get("should_train", True):
+            return {"success": False, "message": "Plan specifies no training should occur. Execution aborted."}
             
-        return {"success": True, "message": "Training started in background."}
+        # Queue the job instead of running inline
+        job_id = enqueue_job(filepath, input_col, output_col, plan)
+            
+        return {"success": True, "message": "Job queued successfully.", "job_id": job_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/finetune/status")
-def finetune_status():
-    return training_state
+def finetune_status(job_id: str):
+    from queue_manager import get_job_status
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return status
 
 @app.get("/api/finetune/export")
-def finetune_export():
+def finetune_export(job_id: str):
     import shutil
     import os
     from fastapi.responses import FileResponse
+    from queue_manager import get_job_status
     
-    if training_state["is_training"]:
-        raise HTTPException(status_code=400, detail="Training is still in progress.")
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Job not found.")
         
-    output_dir = training_state.get("output_dir")
+    if status["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job is not completed yet.")
+        
+    output_dir = status.get("output_dir")
     if not output_dir or not os.path.exists(output_dir):
-        raise HTTPException(status_code=404, detail="No trained model found.")
+        raise HTTPException(status_code=404, detail="No output artifact found for this job.")
         
     zip_path = f"{output_dir}.zip"
     

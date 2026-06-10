@@ -209,10 +209,75 @@ def start_lora_training_cpu(dataset, model_id="Qwen/Qwen2.5-0.5B", batch_size=1,
         "error": None
     })
 
-    # Run training in background thread so API doesn't block
+    # Run training in background thread so API doesn't block (to be deprecated in Phase 4)
     t = threading.Thread(
         target=_train_worker, 
         args=(dataset, model_id, batch_size, lr, epochs, lora_rank, output_dir, use_eval)
     )
     t.daemon = True
     t.start()
+
+# =====================================================================
+# Phase 3: Discrete Execution Paths
+# =====================================================================
+
+def train_small_classifier(dataset_df: pd.DataFrame, input_col: str, output_col: str, output_dir: str):
+    """
+    Trains a lightweight scikit-learn classifier instead of an LLM.
+    Exports as a pickle file.
+    """
+    import pickle
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    pipeline = Pipeline([
+        ('tfidf', TfidfVectorizer(max_features=5000, stop_words='english')),
+        ('clf', LogisticRegression(max_iter=500))
+    ])
+    
+    X = dataset_df[input_col].astype(str)
+    y = dataset_df[output_col].astype(str)
+    
+    pipeline.fit(X, y)
+    
+    model_path = os.path.join(output_dir, "classifier_pipeline.pkl")
+    with open(model_path, "wb") as f:
+        pickle.dump(pipeline, f)
+        
+    return {"status": "success", "model_path": model_path, "classes": list(pipeline.classes_)}
+
+def train_extractor(dataset_df: pd.DataFrame, input_col: str, output_col: str, output_dir: str):
+    """
+    Sets up a prompt-based schema extractor or lightweight regex pipeline.
+    """
+    import json
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # In a real scenario, this might fine-tune a small token-classifier (like BERT) for NER.
+    # For now, it outputs a schema definition template.
+    config_path = os.path.join(output_dir, "extractor_config.json")
+    with open(config_path, "w") as f:
+        json.dump({"type": "schema_extractor", "target_keys": "auto-detected"}, f)
+        
+    return {"status": "success", "config_path": config_path}
+
+def build_rag_pipeline(dataset_df: pd.DataFrame, input_col: str, output_col: str, output_dir: str):
+    """
+    Indexes the documents into a vector database instead of fine-tuning.
+    """
+    import chromadb
+    os.makedirs(output_dir, exist_ok=True)
+    
+    client = chromadb.PersistentClient(path=os.path.join(output_dir, "chroma_index"))
+    collection = client.create_collection(name="rag_knowledge_base")
+    
+    docs = dataset_df[output_col].astype(str).tolist()
+    ids = [f"doc_{i}" for i in range(len(docs))]
+    
+    collection.add(documents=docs, ids=ids)
+    
+    return {"status": "success", "index_path": os.path.join(output_dir, "chroma_index")}
+

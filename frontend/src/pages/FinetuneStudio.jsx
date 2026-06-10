@@ -198,26 +198,22 @@ const FinetuneStudio = () => {
     if (currentStep === 3) handleConvert();
   }, [targetFormat, currentStep]);
 
-  // Stage 4: Train
+  // Stage 4: Train / Execute
   const handleStartTraining = async () => {
     const formData = new FormData();
     formData.append('filepath', filepath);
     formData.append('input_col', inputCol);
     formData.append('output_col', outputCol);
-    formData.append('model_id', modelId);
-    formData.append('batch_size', batchSize);
-    formData.append('lr', lr);
-    formData.append('epochs', epochs);
-    formData.append('lora_rank', loraRank);
-    formData.append('target_format', targetFormat);
-    formData.append('use_eval', useEval);
+    formData.append('plan_json', JSON.stringify(analysis.training_plan));
 
     try {
-      const res = await fetch('http://localhost:8000/api/finetune/start', {
+      const res = await fetch('http://localhost:8000/api/finetune/execute', {
         method: 'POST', body: formData,
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.detail);
+      if (!data.success) throw new Error(data.message || data.detail);
+      
+      // Update global job_id if we want to poll it, for now we just rely on global status polling
       maxStepReached.current = Math.max(maxStepReached.current, 5);
       setCurrentStep(5);
     } catch (err) {
@@ -249,9 +245,9 @@ const FinetuneStudio = () => {
 
   const steps = [
     { num: 1, title: 'Upload Data', icon: <UploadCloud size={18} /> },
-    { num: 2, title: 'Diagnosis', icon: <Activity size={18} /> },
+    { num: 2, title: 'Plan Review', icon: <Activity size={18} /> },
     { num: 3, title: 'Data Prep', icon: <LayoutTemplate size={18} /> },
-    { num: 4, title: 'Train Model', icon: <Settings size={18} /> },
+    { num: 4, title: 'Config & Execute', icon: <Settings size={18} /> },
     { num: 5, title: 'Live Monitor', icon: <BarChart2 size={18} /> },
     { num: 6, title: 'Deploy', icon: <Zap size={18} /> },
   ];
@@ -371,41 +367,54 @@ const FinetuneStudio = () => {
                   </div>
                   
                   <button onClick={handleAnalyze} disabled={!inputCol || !outputCol || loading} className="primary-btn">
-                    Analyze my data <ArrowRight size={20} />
+                    Generate Execution Plan <ArrowRight size={20} />
                   </button>
                 </div>
               )}
             </>
           )}
 
-          {/* STAGE 2: DIAGNOSIS */}
-          {currentStep === 2 && analysis && (
+          {/* STAGE 2: PLAN REVIEW */}
+          {currentStep === 2 && analysis && analysis.training_plan && (
             <>
-              <div className={`alert-box ${analysis.suitability.fine_tuning_needed === true ? 'success' : 'warning'}`}>
-                <div style={{ color: analysis.suitability.fine_tuning_needed === true ? '#16a34a' : '#ca8a04' }}>
-                  {analysis.suitability.fine_tuning_needed === true ? <CheckCircle size={48} /> : <AlertTriangle size={48} />}
+              <div className={`alert-box ${analysis.training_plan.should_train ? 'success' : 'warning'}`}>
+                <div style={{ color: analysis.training_plan.should_train ? '#16a34a' : '#ca8a04' }}>
+                  {analysis.training_plan.should_train ? <CheckCircle size={48} /> : <AlertTriangle size={48} />}
                 </div>
                 <div>
                   <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem' }}>
-                    {analysis.suitability.fine_tuning_needed === true ? 'Great news! Fine-tuning is highly recommended.' : 'Wait! Fine-tuning might not be the best choice.'}
+                    {analysis.training_plan.should_train ? 'Training Approved by AI Planner' : 'Training Not Recommended'}
                   </h2>
-                  <p style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', lineHeight: 1.5 }}>{analysis.suitability.reason}</p>
+                  <p style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', lineHeight: 1.5 }}>{analysis.training_plan.reasoning}</p>
                   
-                  <div style={{ display: 'flex', gap: '2rem', marginTop: '1.5rem' }}>
+                  <div style={{ display: 'flex', gap: '2rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
                     <div>
-                      <div className="label" style={{ fontSize: '0.8rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Detected Data Type</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{analysis.suitability.task_type}</div>
+                      <div className="label" style={{ fontSize: '0.8rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Task Type</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, textTransform: 'capitalize' }}>{analysis.training_plan.task_type.replace('_', ' ')}</div>
                     </div>
                     <div>
-                      <div className="label" style={{ fontSize: '0.8rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Best Approach</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#2563eb' }}>{analysis.suitability.best_option}</div>
+                      <div className="label" style={{ fontSize: '0.8rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Execution Mode</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#2563eb' }}>{analysis.training_plan.execution_mode}</div>
+                    </div>
+                    <div>
+                      <div className="label" style={{ fontSize: '0.8rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Confidence</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: analysis.training_plan.confidence > 0.9 ? '#16a34a' : '#ca8a04' }}>
+                        {(analysis.training_plan.confidence * 100).toFixed(0)}%
+                      </div>
                     </div>
                   </div>
+                  
+                  {analysis.training_plan.baseline_results && (
+                    <div style={{ marginTop: '1.5rem', background: 'rgba(0,0,0,0.05)', padding: '1rem', borderRadius: '8px' }}>
+                      <div className="label" style={{ fontSize: '0.8rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Baseline Test Result</div>
+                      <div style={{ fontSize: '1rem', fontWeight: 600 }}>{analysis.training_plan.baseline_results.message}</div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="stage-card">
-                <h3><Activity color="#a855f7"/> Data Quality Report</h3>
+                <h3><Activity color="#a855f7"/> Data Quality & Budgets</h3>
                 
                 <div className="metric-grid">
                   <div className="metric-card">
@@ -415,27 +424,21 @@ const FinetuneStudio = () => {
                   </div>
                   <div className="metric-card">
                     <FileText size={24} color="#a855f7" />
-                    <span className="value">{analysis.quality.unique_outputs}</span>
-                    <span className="label">Unique Answers</span>
+                    <span className="value">{analysis.training_plan.estimated_time}</span>
+                    <span className="label">Est. Time</span>
                   </div>
-                  <div className="metric-card" style={{ background: '#fef2f2', borderColor: '#fecaca' }}>
-                    <ShieldAlert size={24} color="#ef4444" />
-                    <span className="value" style={{ color: '#991b1b' }}>{analysis.quality.missing_values}</span>
-                    <span className="label" style={{ color: '#b91c1c' }}>Missing Values</span>
-                  </div>
-                  <div className="metric-card" style={{ background: '#fefce8', borderColor: '#fef08a' }}>
-                    <AlertTriangle size={24} color="#ca8a04" />
-                    <span className="value" style={{ color: '#854d0e' }}>{analysis.quality.duplicates}</span>
-                    <span className="label" style={{ color: '#a16207' }}>Exact Duplicates</span>
+                  <div className="metric-card" style={{ background: '#f8fafc', borderColor: '#cbd5e1' }}>
+                    <Settings size={24} color="#475569" />
+                    <span className="value" style={{ color: '#334155' }}>{analysis.training_plan.budget_limits?.max_rows || 'N/A'}</span>
+                    <span className="label" style={{ color: '#475569' }}>Row Budget Limit</span>
                   </div>
                 </div>
 
-                {analysis.quality.warnings.length > 0 && (
+                {analysis.training_plan.dataset_quality_flags?.length > 0 && (
                   <div className="warning-banner">
-                    <h4><AlertTriangle size={20} /> Action Required</h4>
-                    <p style={{ color: '#b91c1c', marginBottom: '1rem', marginTop: 0 }}>We found some messy data. If you train the AI on bad data, it will give bad answers. Please review these warnings:</p>
+                    <h4><AlertTriangle size={20} /> Dataset Flags</h4>
                     <ul>
-                      {analysis.quality.warnings.map((w, i) => (
+                      {analysis.training_plan.dataset_quality_flags.map((w, i) => (
                         <li key={i} style={{ marginBottom: '0.5rem' }}>{w}</li>
                       ))}
                     </ul>
@@ -443,7 +446,7 @@ const FinetuneStudio = () => {
                 )}
 
                 <button onClick={() => { maxStepReached.current = Math.max(maxStepReached.current, 3); setCurrentStep(3); }} className="primary-btn">
-                  Looks good, continue to Preparation <ArrowRight size={18} />
+                  Looks good, continue <ArrowRight size={18} />
                 </button>
               </div>
             </>
@@ -605,7 +608,7 @@ const FinetuneStudio = () => {
                 className="primary-btn"
                 style={{ marginTop: '3rem', padding: '1.5rem', fontSize: '1.25rem', background: trainingState.is_training ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #4f46e5)' }}
               >
-                {trainingState.is_training ? <><Loader className="spin" /> Training job is active...</> : <><Play fill="white" size={24} /> Launch Training Job Now</>}
+                {trainingState.is_training ? <><Loader className="spin" /> Job is active...</> : <><Play fill="white" size={24} /> Approve Plan & Queue Execution</>}
               </button>
             </div>
           )}
