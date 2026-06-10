@@ -14,7 +14,7 @@ const ResearchAssistant = () => {
   
   const worker = useRef(null);
   const messagesEndRef = useRef(null);
-  const RAG_SOURCE = "ResearchApp_" + Math.random().toString(36).substring(7);
+  const RAG_SOURCE = useRef("ResearchApp_" + Math.random().toString(36).substring(7)).current;
 
   useEffect(() => {
     worker.current = new Worker(new URL('../../worker.js', import.meta.url), { type: 'module' });
@@ -92,7 +92,7 @@ const ResearchAssistant = () => {
       
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('chunking_strategy', 'sentence');
+      formData.append('chunking_strategy', 'paragraph');
       
       const ingestRes = await fetch('http://localhost:8000/api/ingest-advanced', {
         method: 'POST',
@@ -136,7 +136,7 @@ const ResearchAssistant = () => {
       const res = await fetch('http://localhost:8000/api/vector/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMessage, n_results: 3 })
+        body: JSON.stringify({ query: userMessage, n_results: 6 })
       });
       const data = await res.json();
       
@@ -153,10 +153,11 @@ const ResearchAssistant = () => {
       console.error(err);
     }
 
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-    setMessages(prev => [...prev, { role: 'assistant', content: '...' }]);
+    // Fix async state bug: build conversation history using the NEW array directly
+    const newMessages = [...messages, { role: 'user', content: userMessage }];
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }, { role: 'assistant', content: '...' }]);
     
-    const conversationHistory = messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+    const conversationHistory = newMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
     const finalPrompt = `${promptContext}User: ${userMessage}\n`;
     worker.current.postMessage({ type: 'generate', text: `${conversationHistory}\n${finalPrompt}` });
   };

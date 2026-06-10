@@ -43,14 +43,12 @@ self.addEventListener('message', async (event) => {
             
             self.postMessage({ status: 'processing' });
             
-            // Format prompt for T5 (Encoder-Decoder architecture)
-            // T5 doesn't need system tags, just plain instructions.
-            const prompt = `Instruction: Answer the user's question based on the following conversation and context.\n\n${text}`;
+            const prompt = `Instruction: You are an AI Research Assistant. You must answer the user's question STRICTLY and ONLY using the provided Context. If the answer cannot be found in the Context, you must reply exactly with: "I don't know based on the paper." Do not make up information or guess.\n\n${text}\nAnswer:`;
 
             const output = await generator(prompt, {
-                max_new_tokens: 128,
-                temperature: 0.7,
-                do_sample: true,
+                max_new_tokens: 256,
+                temperature: 0.1,
+                do_sample: false,
                 // We use a callback to stream tokens back
                 callback_function: (beams) => {
                     const decodedText = generator.tokenizer.decode(beams[0].output_token_ids, { skip_special_tokens: true });
