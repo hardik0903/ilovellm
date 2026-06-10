@@ -146,6 +146,27 @@ def register_artifact(job_id: str, artifact_type: str, artifact_path: str, metad
     conn.close()
     return art_id
 
+def get_all_artifacts():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, job_id, artifact_type, artifact_path, version, created_at, metadata_json, metrics_json FROM artifacts ORDER BY created_at DESC')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        results.append({
+            "id": row[0],
+            "job_id": row[1],
+            "artifact_type": row[2],
+            "artifact_path": row[3],
+            "version": row[4],
+            "created_at": row[5],
+            "metadata": json.loads(row[6]) if row[6] else {},
+            "metrics": json.loads(row[7]) if row[7] else {}
+        })
+    return results
+
 def fail_job(job_id: str, error_message: str):
     now = datetime.datetime.now().isoformat()
     conn = sqlite3.connect(DB_PATH)

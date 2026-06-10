@@ -15,7 +15,6 @@ import httpx
 import chromadb
 from ingester import ingest_file, parse_youtube
 from chunker import apply_chunking
-from finetuner import prepare_dataset, start_lora_training_cpu, training_state
 from duckduckgo_search import DDGS
 from scraper import scrape_static, scrape_dynamic, scrape_authenticated, init_browser, close_browser
 from apscheduler.schedulers.asyncio import AsyncIOScheduler

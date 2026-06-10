@@ -105,10 +105,58 @@ const InfoSection = () => (
   </section>
 );
 
+const AppHubSection = () => {
+  const navigate = useNavigate();
+  const apps = [
+    { title: "Research Assistant", img: "/Phtos/ResearchAssistant.png", path: "/app/research", desc: "Scrape papers & ask questions." },
+    { title: "Price Intelligence", img: "/Phtos/Ecommerce.png", path: "/app/ecommerce", desc: "Track competitor pricing automatically." },
+    { title: "Job Market Analyzer", img: "/Phtos/JobMarketAnalyzer.png", path: "/app/jobs", desc: "Extract skills & salaries from job boards." },
+    { title: "Legal Document Analyzer", img: "/Phtos/LegalDocument.png", path: "/app/legal", desc: "Summarize & flag contract clauses." },
+    { title: "News Bias Detector", img: "/Phtos/NewsAggregator.png", path: "/app/news", desc: "Aggregate news & analyze sentiment." },
+    { title: "Customer Review Insights", img: "/Phtos/CustomerReview.png", path: "/app/reviews", desc: "Extract pain points from reviews." },
+    { title: "Government Data Monitor", img: "/Phtos/Government.png", path: "/app/gov", desc: "Track public tenders & policy changes." }
+  ];
+
+  return (
+    <section style={{ padding: '4rem 2rem', backgroundColor: '#f8fafc' }}>
+      <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+        <h2 style={{ fontSize: '2.5rem', color: '#0f172a', fontWeight: '800' }}>Automated Applications Hub</h2>
+        <p style={{ color: '#64748b', fontSize: '1.2rem' }}>Ready-to-use solutions powered by the underlying iLoveLLM primitives.</p>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
+        {apps.map((app, i) => (
+          <div 
+            key={i} 
+            onClick={() => navigate(app.path)}
+            style={{ 
+              backgroundColor: 'white', borderRadius: '16px', overflow: 'hidden', 
+              boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', cursor: 'pointer',
+              transition: 'transform 0.2s', border: '1px solid #e2e8f0'
+            }}
+            onMouseOver={e => e.currentTarget.style.transform = 'translateY(-5px)'}
+            onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+          >
+            <img src={app.img} alt={app.title} style={{ width: '100%', height: '200px', objectFit: 'cover', borderBottom: '1px solid #e2e8f0' }} />
+            <div style={{ padding: '1.5rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', color: '#1e293b' }}>{app.title}</h3>
+              <p style={{ margin: 0, color: '#64748b' }}>{app.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 const Dashboard = () => {
   return (
     <div className="dashboard-page">
       <Hero />
+      <AppHubSection />
+      <div style={{ textAlign: 'center', padding: '4rem 2rem 1rem 2rem' }}>
+        <h2 style={{ fontSize: '2rem', color: '#2d3748' }}>Underlying Primitive Tools</h2>
+        <p style={{ color: '#718096' }}>Build your own pipelines using our core services.</p>
+      </div>
       <main className="tool-grid">
         {tools.map((tool, index) => (
           <ToolCard 
