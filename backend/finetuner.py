@@ -238,8 +238,9 @@ def train_small_classifier(dataset_df: pd.DataFrame, input_col: str, output_col:
         ('clf', LogisticRegression(max_iter=500))
     ])
     
-    X = dataset_df[input_col].astype(str)
-    y = dataset_df[output_col].astype(str)
+    df = dataset_df.dropna(subset=[input_col, output_col]).copy()
+    X = df[input_col].astype(str)
+    y = df[output_col].astype(str)
     
     pipeline.fit(X, y)
     
@@ -274,7 +275,8 @@ def build_rag_pipeline(dataset_df: pd.DataFrame, input_col: str, output_col: str
     client = chromadb.PersistentClient(path=os.path.join(output_dir, "chroma_index"))
     collection = client.create_collection(name="rag_knowledge_base")
     
-    docs = dataset_df[output_col].astype(str).tolist()
+    df = dataset_df.dropna(subset=[output_col]).copy()
+    docs = df[output_col].astype(str).tolist()
     ids = [f"doc_{i}" for i in range(len(docs))]
     
     collection.add(documents=docs, ids=ids)
