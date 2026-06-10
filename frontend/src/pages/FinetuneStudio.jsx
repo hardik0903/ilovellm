@@ -45,29 +45,30 @@ const FinetuneStudio = () => {
   const [useEval, setUseEval] = useState(true);
 
   // Stage 5 & 6: Training & Eval
+  const [jobId, setJobId] = useState(null);
   const [trainingState, setTrainingState] = useState({
-    is_training: false, current_epoch: 0, total_epochs: 0,
-    current_step: 0, max_steps: 0, loss: 0.0,
-    loss_history: [], eval_metrics: null, status: 'Idle', error: null, output_dir: null
+    status: 'Idle', logs: '', error: null, output_dir: null
   });
 
   const fileInputRef = useRef(null);
 
   // Poll status globally
   useEffect(() => {
+    if (!jobId) return;
+
     const fetchStatus = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/finetune/status');
+        const res = await fetch(`http://localhost:8000/api/finetune/status?job_id=${jobId}`);
         const data = await res.json();
         setTrainingState(data);
         
         // Auto-restore step 5 if we discover a background job is running
-        if (data.is_training && currentStep < 5) {
+        if (data.status === 'running' && currentStep < 5) {
           maxStepReached.current = Math.max(maxStepReached.current, 5);
           setCurrentStep(5);
         }
         
-        if (!data.is_training && data.status === 'Training Completed Successfully!') {
+        if (data.status === 'completed') {
           maxStepReached.current = Math.max(maxStepReached.current, 6);
         }
       } catch (err) {
@@ -78,7 +79,7 @@ const FinetuneStudio = () => {
     fetchStatus();
     const interval = setInterval(fetchStatus, 2000);
     return () => clearInterval(interval);
-  }, [currentStep]);
+  }, [currentStep, jobId]);
 
   // Stage 1: Upload
   const handleFileUpload = async (e) => {
@@ -213,7 +214,7 @@ const FinetuneStudio = () => {
       const data = await res.json();
       if (!data.success) throw new Error(data.message || data.detail);
       
-      // Update global job_id if we want to poll it, for now we just rely on global status polling
+      setJobId(data.job_id);
       maxStepReached.current = Math.max(maxStepReached.current, 5);
       setCurrentStep(5);
     } catch (err) {
@@ -604,11 +605,11 @@ const FinetuneStudio = () => {
 
               <button 
                 onClick={handleStartTraining}
-                disabled={trainingState.is_training}
+                disabled={trainingState.status === 'queued' || trainingState.status === 'running'}
                 className="primary-btn"
-                style={{ marginTop: '3rem', padding: '1.5rem', fontSize: '1.25rem', background: trainingState.is_training ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #4f46e5)' }}
+                style={{ marginTop: '3rem', padding: '1.5rem', fontSize: '1.25rem', background: (trainingState.status === 'queued' || trainingState.status === 'running') ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #4f46e5)' }}
               >
-                {trainingState.is_training ? <><Loader className="spin" /> Job is active...</> : <><Play fill="white" size={24} /> Approve Plan & Queue Execution</>}
+                {(trainingState.status === 'queued' || trainingState.status === 'running') ? <><Loader className="spin" /> Job is active...</> : <><Play fill="white" size={24} /> Approve Plan & Queue Execution</>}
               </button>
             </div>
           )}
@@ -618,73 +619,36 @@ const FinetuneStudio = () => {
             <div className="dark-dashboard">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <h2 style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}><Activity color="#60a5fa" size={36}/> Live Training Monitor</h2>
-                  <p>Watch your model's error rate (Loss) drop in real time.</p>
+                  <h2 style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}><Activity color="#60a5fa" size={36}/> Live Execution Monitor</h2>
+                  <p>Watch your job execute in the background worker queue.</p>
                   
-                  {/* Status indicator with explanation for long CPU loads */}
+                  {/* Status indicator */}
                   <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#1e293b', borderRadius: '12px', border: '1px solid #334155', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontWeight: 'bold' }}>
-                    <span style={{ color: trainingState.status.includes('Loading model') ? '#f59e0b' : '#38bdf8' }}>Status:</span> 
-                    {trainingState.status}
+                    <span style={{ color: trainingState.status === 'completed' ? '#10b981' : '#f59e0b' }}>Status:</span> 
+                    <span style={{ textTransform: 'capitalize' }}>{trainingState.status || 'Waiting for job...'}</span>
                   </div>
-                  {trainingState.status.includes('Loading model') && (
-                    <p style={{ color: '#f59e0b', fontSize: '0.85rem', marginTop: '0.5rem', maxWidth: '500px' }}>
-                      <Info size={14} style={{ display: 'inline', marginBottom: '-2px' }}/> Downloading foundation model weights to your local machine. Since you are running on a CPU, this can take 2-5 minutes depending on internet speed.
-                    </p>
-                  )}
                 </div>
               </div>
 
-              {trainingState.error && (
+              {trainingState.status === 'failed' && (
                 <div style={{ background: '#7f1d1d', color: '#fecaca', padding: '1rem', borderRadius: '12px', marginTop: '2rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <AlertTriangle size={20} /> <strong>{trainingState.error}</strong>
+                  <AlertTriangle size={20} /> <strong>Execution Failed. Please check the logs below.</strong>
                 </div>
               )}
 
-              <div className="stat-row">
-                <div className="dark-stat">
-                  <div className="label"><LayoutTemplate size={14} style={{ display: 'inline', marginBottom: '-2px' }}/> Current Epoch</div>
-                  <div className="value">{trainingState.current_epoch} <span style={{ fontSize: '1.5rem', color: '#64748b' }}>/ {trainingState.total_epochs}</span></div>
-                  <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.5rem' }}>Times it has read the whole dataset</div>
+              <div className="code-block" style={{ marginTop: '2rem', minHeight: '300px', maxHeight: '400px', overflowY: 'auto' }}>
+                <div style={{ color: '#94a3b8', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Binary size={14}/> Server Logs
                 </div>
-                <div className="dark-stat">
-                  <div className="label"><Settings size={14} style={{ display: 'inline', marginBottom: '-2px' }}/> Global Step</div>
-                  <div className="value">{trainingState.current_step} <span style={{ fontSize: '1.5rem', color: '#64748b' }}>/ {trainingState.max_steps}</span></div>
-                  <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.5rem' }}>Individual learning updates made</div>
-                </div>
-                <div className="dark-stat" style={{ borderColor: '#3b82f6' }}>
-                  <div className="label" style={{ color: '#60a5fa' }}><TrendingDown size={14} style={{ display: 'inline', marginBottom: '-2px' }}/> Training Loss</div>
-                  <div className="value" style={{ color: 'white' }}>{trainingState.loss.toFixed(4)}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#60a5fa', marginTop: '0.5rem' }}>Lower is better. Represents AI confusion.</div>
-                </div>
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+                  {trainingState.logs || "Waiting for worker to claim job..."}
+                </pre>
               </div>
-
-              {trainingState.max_steps > 0 && (
-                <div style={{ marginBottom: '2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-                    <span>Progress</span>
-                    <span>{Math.round((trainingState.current_step / trainingState.max_steps) * 100)}%</span>
-                  </div>
-                  <div style={{ height: '12px', background: '#1e293b', borderRadius: '10px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', background: 'linear-gradient(90deg, #3b82f6, #a855f7)', width: `${Math.min(100, (trainingState.current_step / trainingState.max_steps) * 100)}%`, transition: 'width 0.5s ease-out' }}></div>
-                  </div>
-                </div>
-              )}
-
-              {trainingState.loss_history.length > 0 && (
-                <div className="chart-container">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={trainingState.loss_history} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                      <XAxis dataKey="step" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', color: '#f8fafc' }} 
-                        itemStyle={{ color: '#60a5fa', fontWeight: 'bold' }}
-                      />
-                      <Line type="monotone" dataKey="loss" stroke="#3b82f6" strokeWidth={4} dot={false} isAnimationActive={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+              
+              {trainingState.status === 'completed' && (
+                <button onClick={() => { maxStepReached.current = Math.max(maxStepReached.current, 6); setCurrentStep(6); }} className="primary-btn" style={{ marginTop: '2rem' }}>
+                  Job Completed! Proceed to Export <ArrowRight size={18} />
+                </button>
               )}
             </div>
           )}
@@ -705,7 +669,7 @@ const FinetuneStudio = () => {
                   </div>
                   <h3 style={{ fontSize: '1.5rem', fontWeight: 900, margin: '0 0 0.5rem 0' }}>Download Weights</h3>
                   <p style={{ color: '#64748b', marginBottom: '2rem', lineHeight: 1.6 }}>Export the raw LoRA adapter weights, configuration files, and custom tokenizer dictionary as a single portable ZIP archive.</p>
-                  <button onClick={handleExport} className="primary-btn" style={{ background: 'white', color: '#0f172a', border: '2px solid #e2e8f0' }}>
+                  <button onClick={() => window.open(`http://localhost:8000/api/finetune/export?job_id=${jobId}`, '_blank')} className="primary-btn" style={{ background: 'white', color: '#0f172a', border: '2px solid #e2e8f0' }}>
                     <Save size={20} /> Download .ZIP Archive
                   </button>
                 </div>
