@@ -8,6 +8,9 @@ from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, Browser, Playwright
+import uuid
+import io
+import pdfplumber
 
 # Initialize SQLite Cache for Change Detection
 conn = sqlite3.connect('scraper_cache.db', check_same_thread=False)
@@ -143,6 +146,8 @@ def parse_html(html: str, base_url: str = "") -> dict:
                 res.append(d)
         return res
 
+    extracted_text = "\n".join([c["text"] for c in context])
+
     return {
         "title": title.strip() if title else "",
         "description": description.strip(),
@@ -150,7 +155,13 @@ def parse_html(html: str, base_url: str = "") -> dict:
         "images": dedupe(images),
         "videos": dedupe(videos),
         "context": context,
-        "links": dedupe(links)
+        "links": dedupe(links),
+        "extracted_text": extracted_text,
+        "page_map": [{"page": 1, "text": extracted_text}],
+        "source_type": "html",
+        "content_type": "text/html",
+        "url": base_url,
+        "document_id": str(uuid.uuid4())
     }
 
 async def _check_robots_and_cache(url: str, force_refresh: bool, ignore_robots: bool = False):
@@ -170,6 +181,41 @@ async def scrape_static(url: str, force_refresh: bool = False, ignore_robots: bo
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         try:
             resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            content_type = resp.headers.get("Content-Type", "").lower()
+            
+            # PDF HANDLING
+            if "application/pdf" in content_type or url.lower().endswith(".pdf"):
+                content_hash = hashlib.sha256(resp.content).hexdigest()
+                if not force_refresh and cached and cached["content_hash"] == content_hash:
+                    return {"success": True, "cached": True, "mode": "static", "data": cached["structured_data"]}
+                
+                extracted_text = []
+                page_map = []
+                with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+                    for i, page in enumerate(pdf.pages):
+                        text = page.extract_text()
+                        if text:
+                            extracted_text.append(text)
+                            page_map.append({"page": i + 1, "text": text})
+                            
+                structured_data = {
+                    "title": url.split("/")[-1],
+                    "description": "PDF Document",
+                    "bytes": len(resp.content),
+                    "images": [],
+                    "videos": [],
+                    "context": [{"tag": "p", "text": t} for t in extracted_text],
+                    "links": [],
+                    "extracted_text": "\n\n".join(extracted_text),
+                    "page_map": page_map,
+                    "source_type": "pdf",
+                    "content_type": "application/pdf",
+                    "url": url,
+                    "document_id": str(uuid.uuid4())
+                }
+                update_cache(url, content_hash, structured_data)
+                return {"success": True, "cached": False, "mode": "static", "data": structured_data}
+                
             static_html = resp.text
         except Exception as e:
             return {"success": False, "error": f"Failed static fetch: {str(e)}"}

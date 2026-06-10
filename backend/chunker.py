@@ -151,11 +151,16 @@ def apply_chunking(text_or_elements, strategy="sentence", **kwargs):
     elif strategy == "heading":
         return heading_aware_chunking(text_or_elements)
     elif strategy == "semantic":
-        # If passed a single string, split by double newlines first
         if isinstance(text_or_elements, str):
             paragraphs = text_or_elements.split('\n\n')
         else:
             paragraphs = text_or_elements
         return semantic_chunking(paragraphs, **kwargs)
     else:
-        return [text_or_elements] if isinstance(text_or_elements, str) else text_or_elements
+        # Fallback to semantic chunking instead of a giant blob
+        print(f"Unknown chunking strategy '{strategy}', falling back to 'semantic'")
+        if isinstance(text_or_elements, str):
+            paragraphs = text_or_elements.split('\n\n')
+        else:
+            paragraphs = text_or_elements
+        return semantic_chunking(paragraphs, **kwargs)

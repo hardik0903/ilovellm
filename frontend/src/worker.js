@@ -43,7 +43,7 @@ self.addEventListener('message', async (event) => {
             
             self.postMessage({ status: 'processing' });
             
-            const prompt = `Instruction: You are an AI Research Assistant. You must answer the user's question STRICTLY and ONLY using the provided Context. If the answer cannot be found in the Context, you must reply exactly with: "I don't know based on the paper." Do not make up information or guess.\n\n${text}\nAnswer:`;
+            const prompt = `Instruction: You are an AI Research Assistant. You must answer the user's question STRICTLY and ONLY using the provided Context Evidence. If the answer cannot be found in the Context Evidence or the evidence is weak, you must reply exactly with: "Not found in the paper." Do not make up information, hallucinate, or guess. If you find the answer, cite the Chunk or Page number.\n\n${text}\nAnswer:`;
 
             const output = await generator(prompt, {
                 max_new_tokens: 256,

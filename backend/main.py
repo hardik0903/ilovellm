@@ -172,24 +172,37 @@ async def api_download_media(req: DownloadMediaRequest):
 async def ingest_advanced(
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
-    chunking_strategy: str = Form("sentence"),
+    page_map_json: Optional[str] = Form(None),
+    chunking_strategy: str = Form("semantic"),
     whisper_model: str = Form("base"),
     use_ocr: bool = Form(False)
 ):
     try:
+        import json
         text = ""
         filename = ""
-        if url:
-            filename = url
-            text = parse_youtube(url, model_name=whisper_model)
-        elif file:
-            filename = file.filename
-            content = await file.read()
-            text = ingest_file(filename, content, use_ocr=use_ocr, whisper_model=whisper_model)
+        chunks = []
+        
+        if page_map_json:
+            page_map = json.loads(page_map_json)
+            for page_data in page_map:
+                page_chunks = apply_chunking(page_data['text'], strategy=chunking_strategy)
+                for c in page_chunks:
+                    chunks.append({"text": c, "page": page_data['page']})
+            filename = url if url else "page_map_document"
         else:
-            raise HTTPException(status_code=400, detail="Must provide either file or url")
-            
-        chunks = apply_chunking(text, strategy=chunking_strategy)
+            if url:
+                filename = url
+                text = parse_youtube(url, model_name=whisper_model)
+            elif file:
+                filename = file.filename
+                content = await file.read()
+                text = ingest_file(filename, content, use_ocr=use_ocr, whisper_model=whisper_model)
+            else:
+                raise HTTPException(status_code=400, detail="Must provide either file, url, or page_map_json")
+                
+            raw_chunks = apply_chunking(text, strategy=chunking_strategy)
+            chunks = [{"text": c} for c in raw_chunks]
         
         return {
             "success": True,
@@ -383,6 +396,7 @@ def finetune_export(job_id: str):
 class StoreRequest(BaseModel):
     chunks: list
     source: str
+    document_id: Optional[str] = None
 
 class QueryRequest(BaseModel):
     query: str
@@ -392,19 +406,25 @@ class QueryRequest(BaseModel):
 def vector_store(req: StoreRequest):
     import uuid
     
-    # Extract string texts from chunks (some might be objects like {"text": "...", "page": 1})
     documents = []
-    for chunk in req.chunks:
+    metadatas = []
+    for i, chunk in enumerate(req.chunks):
         if isinstance(chunk, dict) and 'text' in chunk:
             documents.append(chunk['text'])
+            meta = {"source": req.source, "chunk_index": i}
+            if req.document_id: meta["document_id"] = req.document_id
+            if 'page' in chunk: meta["page"] = chunk['page']
+            metadatas.append(meta)
         elif isinstance(chunk, str):
             documents.append(chunk)
+            meta = {"source": req.source, "chunk_index": i}
+            if req.document_id: meta["document_id"] = req.document_id
+            metadatas.append(meta)
             
     if not documents:
         return {"success": False, "error": "No valid text documents provided"}
         
     ids = [str(uuid.uuid4()) for _ in documents]
-    metadatas = [{"source": req.source} for _ in documents]
     
     collection.add(
         documents=documents,
@@ -413,12 +433,21 @@ def vector_store(req: StoreRequest):
     )
     return {"success": True, "inserted": len(documents)}
 
+class QueryRequest(BaseModel):
+    query: str
+    n_results: int = 10
+    document_id: Optional[str] = None
+
 @app.post("/api/vector/query")
 def vector_query(req: QueryRequest):
-    results = collection.query(
-        query_texts=[req.query],
-        n_results=req.n_results
-    )
+    kwargs = {
+        "query_texts": [req.query],
+        "n_results": req.n_results
+    }
+    if req.document_id:
+        kwargs["where"] = {"document_id": req.document_id}
+        
+    results = collection.query(**kwargs)
     return {"success": True, "results": results}
 
 class SearchRequest(BaseModel):
