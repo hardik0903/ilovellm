@@ -450,6 +450,95 @@ def vector_query(req: QueryRequest):
     results = collection.query(**kwargs)
     return {"success": True, "results": results}
 
+class ResearchQueryRequest(BaseModel):
+    query: str
+    document_id: str
+
+@app.post("/api/research/query")
+async def research_query(req: ResearchQueryRequest):
+    from inference_manager import run_inference
+    import json
+    import re
+    
+    def format_context(docs, metas):
+        blocks = []
+        for i, (doc, meta) in enumerate(zip(docs, metas)):
+            page = meta.get("page", "?")
+            blocks.append(f"Chunk {i+1} [Page {page}]:\n{doc}")
+        return "\n\n".join(blocks)
+
+    # 1. Initial Retrieval
+    initial_res = collection.query(
+        query_texts=[req.query], n_results=5, where={"document_id": req.document_id}
+    )
+    docs = initial_res.get("documents", [[]])[0]
+    metas = initial_res.get("metadatas", [[]])[0]
+    
+    # 2. Gap-Check Pass
+    gap_prompt = f"Query: {req.query}\n\nEvidence:\n{format_context(docs, metas)}\n\nDo you have enough evidence to answer? Reply ONLY 'YES' or 'NO: <missing search terms>'."
+    
+    gap_check = await run_inference(
+        artifact_id="base", input_data=gap_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct"
+    )
+    gap_text = gap_check["output"].strip()
+    
+    # 3. Second Retrieval if needed
+    if gap_text.upper().startswith("NO"):
+        missing_query = gap_text[3:].strip()
+        sec_res = collection.query(
+            query_texts=[missing_query], n_results=5, where={"document_id": req.document_id}
+        )
+        # Append unique chunks
+        existing_docs = set(docs)
+        for d, m in zip(sec_res.get("documents", [[]])[0], sec_res.get("metadatas", [[]])[0]):
+            if d not in existing_docs:
+                docs.append(d)
+                metas.append(m)
+                existing_docs.add(d)
+
+    # 4. Synthesize
+    syn_prompt = f"""You are a strict AI Researcher. Answer the user's query based ONLY on the evidence below.
+You MUST output YOUR ENTIRE RESPONSE as a valid JSON object exactly like this:
+{{
+  "answer": "Your detailed answer",
+  "evidence": "Exact quotes from the text",
+  "citations": "Chunk X, Page Y",
+  "confidence": "High/Medium/Low",
+  "abstain_reason": "If you cannot answer it, explain why here. Otherwise empty string."
+}}
+
+If the evidence does NOT contain the answer, you MUST set "answer" to "Not found in the paper." and fill "abstain_reason".
+Do NOT output anything outside the JSON block.
+
+Evidence Context:
+{format_context(docs, metas)}
+
+User Query: {req.query}"""
+
+    syn_res = await run_inference(
+        artifact_id="base", input_data=syn_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct"
+    )
+    raw_output = syn_res["output"]
+    
+    # 5. Validate / Parse JSON
+    parsed_json = None
+    try:
+        match = re.search(r'(\{.*?\})', raw_output.replace('\n', ''), re.DOTALL)
+        if match:
+            parsed_json = json.loads(match.group(1))
+        else:
+            parsed_json = json.loads(raw_output)
+    except Exception:
+        parsed_json = {
+            "answer": raw_output,
+            "evidence": "N/A",
+            "citations": "N/A",
+            "confidence": "Low",
+            "abstain_reason": "Failed to parse structured output."
+        }
+        
+    return {"success": True, "data": parsed_json, "interrogation_passes": 2 if gap_text.upper().startswith("NO") else 1}
+
 class SearchRequest(BaseModel):
     query: str
     max_results: int = 10
