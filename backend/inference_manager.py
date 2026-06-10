@@ -154,7 +154,7 @@ def estimate_cost(tokens: int, model_type: str) -> float:
     rate = cost_map.get(model_type, 0.0001)
     return (tokens / 1000.0) * rate
 
-def _run_inference_sync(artifact_id: str, input_data: str, is_base_model: bool = False, base_model_id: str = "Qwen/Qwen2.5-0.5B-Instruct"):
+def _run_inference_sync(artifact_id: str, input_data: str, is_base_model: bool = False, base_model_id: str = "Qwen/Qwen2.5-0.5B-Instruct", max_tokens: int = 100):
     start_time = time.time()
     
     if is_base_model:
@@ -173,9 +173,9 @@ def _run_inference_sync(artifact_id: str, input_data: str, is_base_model: bool =
         
         if isinstance(model, PeftModel):
             with model.disable_adapter():
-                outputs = model.generate(**inputs, max_new_tokens=100)
+                outputs = model.generate(**inputs, max_new_tokens=max_tokens)
         else:
-            outputs = model.generate(**inputs, max_new_tokens=100)
+            outputs = model.generate(**inputs, max_new_tokens=max_tokens)
             
         result_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         if result_text.startswith(input_data):
@@ -242,7 +242,7 @@ def _run_inference_sync(artifact_id: str, input_data: str, is_base_model: bool =
         model.set_adapter(adapter_name)
         
         inputs = tokenizer(input_data, return_tensors="pt")
-        outputs = model.generate(**inputs, max_new_tokens=100)
+        outputs = model.generate(**inputs, max_new_tokens=max_tokens)
         result_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         
         if result_text.startswith(input_data):
@@ -260,6 +260,6 @@ def _run_inference_sync(artifact_id: str, input_data: str, is_base_model: bool =
             }
         }
 
-async def run_inference(artifact_id: str, input_data: str, is_base_model: bool = False, base_model_id: str = "Qwen/Qwen2.5-0.5B-Instruct"):
+async def run_inference(artifact_id: str, input_data: str, is_base_model: bool = False, base_model_id: str = "Qwen/Qwen2.5-0.5B-Instruct", max_tokens: int = 100):
     """Runs inference in a non-blocking thread to prevent FastAPI from freezing."""
-    return await asyncio.to_thread(_run_inference_sync, artifact_id, input_data, is_base_model, base_model_id)
+    return await asyncio.to_thread(_run_inference_sync, artifact_id, input_data, is_base_model, base_model_id, max_tokens)

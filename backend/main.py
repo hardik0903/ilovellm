@@ -464,12 +464,14 @@ async def research_query(req: ResearchQueryRequest):
         blocks = []
         for i, (doc, meta) in enumerate(zip(docs, metas)):
             page = meta.get("page", "?")
-            blocks.append(f"Chunk {i+1} [Page {page}]:\n{doc}")
+            # Truncate extremely long chunks to prevent CPU attention from hanging
+            truncated_doc = doc[:1500] + "..." if len(doc) > 1500 else doc
+            blocks.append(f"Chunk {i+1} [Page {page}]:\n{truncated_doc}")
         return "\n\n".join(blocks)
 
     # 1. Initial Retrieval
     initial_res = collection.query(
-        query_texts=[req.query], n_results=5, where={"document_id": req.document_id}
+        query_texts=[req.query], n_results=3, where={"document_id": req.document_id}
     )
     docs = initial_res.get("documents", [[]])[0]
     metas = initial_res.get("metadatas", [[]])[0]
@@ -478,7 +480,7 @@ async def research_query(req: ResearchQueryRequest):
     gap_prompt = f"Query: {req.query}\n\nEvidence:\n{format_context(docs, metas)}\n\nDo you have enough evidence to answer? Reply ONLY 'YES' or 'NO: <missing search terms>'."
     
     gap_check = await run_inference(
-        artifact_id="base", input_data=gap_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct"
+        artifact_id="base", input_data=gap_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=30
     )
     gap_text = gap_check["output"].strip()
     
@@ -486,12 +488,12 @@ async def research_query(req: ResearchQueryRequest):
     if gap_text.upper().startswith("NO"):
         missing_query = gap_text[3:].strip()
         sec_res = collection.query(
-            query_texts=[missing_query], n_results=5, where={"document_id": req.document_id}
+            query_texts=[missing_query], n_results=2, where={"document_id": req.document_id}
         )
-        # Append unique chunks
+        # Append unique chunks (max 5 total to save CPU time)
         existing_docs = set(docs)
         for d, m in zip(sec_res.get("documents", [[]])[0], sec_res.get("metadatas", [[]])[0]):
-            if d not in existing_docs:
+            if d not in existing_docs and len(docs) < 5:
                 docs.append(d)
                 metas.append(m)
                 existing_docs.add(d)
@@ -516,7 +518,7 @@ Evidence Context:
 User Query: {req.query}"""
 
     syn_res = await run_inference(
-        artifact_id="base", input_data=syn_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct"
+        artifact_id="base", input_data=syn_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=512
     )
     raw_output = syn_res["output"]
     
