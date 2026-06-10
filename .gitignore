@@ -1,0 +1,31 @@
+# Node
+node_modules/
+dist/
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+.env
+
+# Data and Models
+*.csv
+*.jsonl
+*.json
+!package.json
+!package-lock.json
+models/
+temp_dataset_*
+synthetic_data.csv
+
+# Databases and User Data
+*.sqlite3
+*.db
+chroma_storage/
+*.txt
+*.bin
+
+# Logs
+*.log
