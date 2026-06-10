@@ -2,13 +2,13 @@ import time
 import os
 import pandas as pd
 import traceback
-from queue_manager import claim_next_job, update_job_status
+from queue_manager import claim_next_job, update_job_status, fail_job, heartbeat_job, register_artifact
 from finetuner import (
     train_small_classifier,
     train_extractor,
     build_rag_pipeline,
     prepare_dataset,
-    _train_worker
+    execute_lora_sft
 )
 
 def process_job(job):
@@ -22,27 +22,33 @@ def process_job(job):
     
     update_job_status(job_id, "running", f"Starting execution mode: {exec_mode}")
     
-    # Base output dir
+    def heartbeat():
+        heartbeat_job(job_id)
+        
+    heartbeat() # Initial heartbeat
+    
     base_out = f"./models/{exec_mode}_{job_id[:8]}"
     
     try:
         if exec_mode == "classifier":
             df = pd.read_csv(dataset_path) if dataset_path.endswith('.csv') else pd.read_json(dataset_path, lines=True)
-            res = train_small_classifier(df, input_col, output_col, base_out)
+            zip_path, metadata, metrics = train_small_classifier(df, input_col, output_col, base_out, heartbeat_fn=heartbeat)
+            register_artifact(job_id, exec_mode, zip_path, metadata, metrics)
             update_job_status(job_id, "completed", "Classifier trained successfully.", base_out)
             
         elif exec_mode == "extractor":
             df = pd.read_csv(dataset_path) if dataset_path.endswith('.csv') else pd.read_json(dataset_path, lines=True)
-            res = train_extractor(df, input_col, output_col, base_out)
+            zip_path, metadata, metrics = train_extractor(df, input_col, output_col, base_out, heartbeat_fn=heartbeat)
+            register_artifact(job_id, exec_mode, zip_path, metadata, metrics)
             update_job_status(job_id, "completed", "Schema extractor built successfully.", base_out)
             
         elif exec_mode == "rag":
             df = pd.read_csv(dataset_path) if dataset_path.endswith('.csv') else pd.read_json(dataset_path, lines=True)
-            res = build_rag_pipeline(df, input_col, output_col, base_out)
+            zip_path, metadata, metrics = build_rag_pipeline(df, input_col, output_col, base_out, heartbeat_fn=heartbeat)
+            register_artifact(job_id, exec_mode, zip_path, metadata, metrics)
             update_job_status(job_id, "completed", "RAG vector database indexed successfully.", base_out)
             
         elif exec_mode == "lora_sft":
-            # For Phase 5 Safety budgets, we enforce max rows based on budget_limits
             budget = plan.get("budget_limits", {})
             max_rows = budget.get("max_rows", 10000)
             epochs = budget.get("max_epochs", 3)
@@ -50,7 +56,6 @@ def process_job(job):
             df = pd.read_csv(dataset_path) if dataset_path.endswith('.csv') else pd.read_json(dataset_path, lines=True)
             if len(df) > max_rows:
                 df = df.head(max_rows)
-                # save trimmed df to a temp file
                 trimmed_path = dataset_path + ".trimmed.jsonl"
                 df.to_json(trimmed_path, orient='records', lines=True)
                 dataset_path = trimmed_path
@@ -60,26 +65,20 @@ def process_job(job):
             
             update_job_status(job_id, "running", f"Dataset prepared. Starting SFTTrainer. (Logs are tracked internally)")
             
-            # Since SFTTrainer logs to a global state in the old code, we will just call it synchronously here
-            # In a real production setup, we'd inject a callback that calls update_job_status with the loss
-            _train_worker(
+            zip_path, metadata, metrics = execute_lora_sft(
                 dataset=dataset,
-                model_id="HuggingFaceTB/SmolLM-360M-Instruct", # using smaller model for speed
+                output_dir=base_out,
+                heartbeat_fn=heartbeat,
                 batch_size=1,
                 lr=2e-4,
                 epochs=epochs,
-                lora_rank=8,
-                output_dir=base_out,
-                use_eval=True
+                lora_rank=8
             )
-            # if _train_worker completes without exception (it handles its own internally, but let's assume it populates global state)
-            from finetuner import training_state
-            if training_state.get("error"):
-                raise Exception(training_state["error"])
                 
+            register_artifact(job_id, exec_mode, zip_path, metadata, metrics)
             update_job_status(job_id, "completed", "LoRA SFT training completed.", base_out)
             
-        elif exec_mode == "no_train" or exec_mode == "browser":
+        elif exec_mode == "no_train" or exec_mode == "manual_review":
             update_job_status(job_id, "completed", f"Mode {exec_mode} does not require background execution.", base_out)
             
         else:
@@ -87,10 +86,9 @@ def process_job(job):
             
     except Exception as e:
         err_msg = str(e) + "\n" + traceback.format_exc()
-        update_job_status(job_id, "failed", f"Execution failed:\n{err_msg}")
+        fail_job(job_id, err_msg)
         
     finally:
-        # Cleanup temp dataset file
         if os.path.exists(dataset_path) and dataset_path.startswith("temp_"):
             try:
                 os.remove(dataset_path)

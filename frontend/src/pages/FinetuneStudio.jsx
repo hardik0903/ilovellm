@@ -425,13 +425,13 @@ const FinetuneStudio = () => {
                   </div>
                   <div className="metric-card">
                     <FileText size={24} color="#a855f7" />
-                    <span className="value">{analysis.training_plan.estimated_time}</span>
+                    <span className="value">{analysis.training_plan.resource_estimates?.expected_runtime || analysis.training_plan.estimated_time || 'N/A'}</span>
                     <span className="label">Est. Time</span>
                   </div>
                   <div className="metric-card" style={{ background: '#f8fafc', borderColor: '#cbd5e1' }}>
-                    <Settings size={24} color="#475569" />
-                    <span className="value" style={{ color: '#334155' }}>{analysis.training_plan.budget_limits?.max_rows || 'N/A'}</span>
-                    <span className="label" style={{ color: '#475569' }}>Row Budget Limit</span>
+                    <Cpu size={24} color="#475569" />
+                    <span className="value" style={{ color: '#334155' }}>{analysis.training_plan.resource_estimates?.expected_ram || 'N/A'}</span>
+                    <span className="label" style={{ color: '#475569' }}>Est. RAM</span>
                   </div>
                 </div>
 
@@ -605,11 +605,11 @@ const FinetuneStudio = () => {
 
               <button 
                 onClick={handleStartTraining}
-                disabled={trainingState.status === 'queued' || trainingState.status === 'running'}
+                disabled={analysis?.training_plan?.execution_mode === 'manual_review' || trainingState.status === 'queued' || trainingState.status === 'running'}
                 className="primary-btn"
-                style={{ marginTop: '3rem', padding: '1.5rem', fontSize: '1.25rem', background: (trainingState.status === 'queued' || trainingState.status === 'running') ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #4f46e5)' }}
+                style={{ marginTop: '3rem', padding: '1.5rem', fontSize: '1.25rem', background: (analysis?.training_plan?.execution_mode === 'manual_review' || trainingState.status === 'queued' || trainingState.status === 'running') ? '#94a3b8' : 'linear-gradient(135deg, #2563eb, #4f46e5)' }}
               >
-                {(trainingState.status === 'queued' || trainingState.status === 'running') ? <><Loader className="spin" /> Job is active...</> : <><Play fill="white" size={24} /> Approve Plan & Queue Execution</>}
+                {(trainingState.status === 'queued' || trainingState.status === 'running') ? <><Loader className="spin" /> Job is active...</> : <><Play fill="white" size={24} /> {analysis?.training_plan?.execution_mode === 'manual_review' ? 'Manual Review Required' : `Execute ${analysis?.training_plan?.execution_mode || 'Pipeline'}`}</>}
               </button>
             </div>
           )}
@@ -660,15 +660,15 @@ const FinetuneStudio = () => {
                 <CheckCircle size={56} />
               </div>
               <h2 style={{ fontSize: '3rem', fontWeight: 900, margin: '0 0 1rem 0' }}>Your Custom AI is Ready.</h2>
-              <p style={{ color: '#64748b', fontSize: '1.25rem', maxWidth: '600px', margin: '0 auto 4rem auto' }}>The LoRA adapters have been successfully trained and saved directly to your local file system. It's time to put your AI to work.</p>
+              <p style={{ color: '#64748b', fontSize: '1.25rem', maxWidth: '600px', margin: '0 auto 4rem auto' }}>The pipeline has completed its execution and packaged the resulting artifacts. It's time to put your AI to work.</p>
               
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', textAlign: 'left' }}>
                 <div style={{ background: '#f8fafc', padding: '2.5rem', borderRadius: '24px', border: '1px solid #e2e8f0' }}>
                   <div style={{ background: '#dbeafe', color: '#2563eb', width: '64px', height: '64px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem' }}>
                     <Download size={32} />
                   </div>
-                  <h3 style={{ fontSize: '1.5rem', fontWeight: 900, margin: '0 0 0.5rem 0' }}>Download Weights</h3>
-                  <p style={{ color: '#64748b', marginBottom: '2rem', lineHeight: 1.6 }}>Export the raw LoRA adapter weights, configuration files, and custom tokenizer dictionary as a single portable ZIP archive.</p>
+                  <h3 style={{ fontSize: '1.5rem', fontWeight: 900, margin: '0 0 0.5rem 0' }}>Download Export Package</h3>
+                  <p style={{ color: '#64748b', marginBottom: '2rem', lineHeight: 1.6 }}>Export the packaged artifacts (models, configuration files, and metrics) as a self-describing ZIP archive.</p>
                   <button onClick={() => window.open(`http://localhost:8000/api/finetune/export?job_id=${jobId}`, '_blank')} className="primary-btn" style={{ background: 'white', color: '#0f172a', border: '2px solid #e2e8f0' }}>
                     <Save size={20} /> Download .ZIP Archive
                   </button>

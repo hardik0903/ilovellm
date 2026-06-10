@@ -340,6 +340,9 @@ async def finetune_execute(
         if not plan.get("should_train", True):
             return {"success": False, "message": "Plan specifies no training should occur. Execution aborted."}
             
+        if plan.get("execution_mode") == "manual_review":
+            return {"success": False, "message": "This dataset requires manual review and cannot be executed automatically."}
+            
         # Queue the job instead of running inline
         job_id = enqueue_job(filepath, input_col, output_col, plan)
             
@@ -357,10 +360,9 @@ def finetune_status(job_id: str):
 
 @app.get("/api/finetune/export")
 def finetune_export(job_id: str):
-    import shutil
     import os
     from fastapi.responses import FileResponse
-    from queue_manager import get_job_status
+    from queue_manager import get_artifact_by_job, get_job_status
     
     status = get_job_status(job_id)
     if not status:
@@ -369,18 +371,13 @@ def finetune_export(job_id: str):
     if status["status"] != "completed":
         raise HTTPException(status_code=400, detail="Job is not completed yet.")
         
-    output_dir = status.get("output_dir")
-    if not output_dir or not os.path.exists(output_dir):
+    artifact = get_artifact_by_job(job_id)
+    if not artifact or not os.path.exists(artifact["artifact_path"]):
         raise HTTPException(status_code=404, detail="No output artifact found for this job.")
         
-    zip_path = f"{output_dir}.zip"
-    
-    if not os.path.exists(zip_path):
-        shutil.make_archive(output_dir, 'zip', output_dir)
-        
     return FileResponse(
-        path=zip_path,
-        filename=os.path.basename(zip_path),
+        path=artifact["artifact_path"],
+        filename=os.path.basename(artifact["artifact_path"]),
         media_type='application/zip'
     )
 

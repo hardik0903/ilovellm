@@ -9,30 +9,44 @@ def run_baselines(df: pd.DataFrame, input_col: str, output_col: str, execution_m
     Quickly tests the cheapest solutions before committing to heavy fine-tuning.
     Returns baseline metrics and a recommendation to skip training if baseline is strong.
     """
-    df_sample = df.head(min(100, len(df)))
-    
     if execution_mode == "classifier":
         try:
             from sklearn.feature_extraction.text import TfidfVectorizer
             from sklearn.linear_model import LogisticRegression
-            from sklearn.model_selection import cross_val_score
+            from sklearn.model_selection import train_test_split
             
-            vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
-            X = vectorizer.fit_transform(df_sample[input_col].astype(str))
-            y = df_sample[output_col].astype(str)
-            
-            # Require at least 2 classes with at least 2 samples each for cross_val
-            if len(y.unique()) > 1 and min(y.value_counts()) >= 2:
-                model = LogisticRegression(max_iter=100)
-                scores = cross_val_score(model, X, y, cv=min(3, min(y.value_counts())))
-                accuracy = scores.mean()
-                
+            df_valid = df.dropna(subset=[input_col, output_col]).copy()
+            if len(df_valid) < 10:
                 return {
                     "baseline_method": "LogisticRegression + TF-IDF",
-                    "accuracy_score": float(accuracy),
-                    "is_sufficient": bool(accuracy > 0.90),
-                    "message": f"Baseline classifier achieved {accuracy*100:.1f}% accuracy on a sample."
+                    "accuracy_score": None,
+                    "is_sufficient": False,
+                    "message": "Not enough valid rows for a confident baseline."
                 }
+                
+            X_text = df_valid[input_col].astype(str)
+            y = df_valid[output_col].astype(str)
+            
+            if len(X_text) > 5000:
+                X_text, y = X_text.iloc[:5000], y.iloc[:5000]
+                
+            stratify_y = y if (len(y.unique()) > 1 and min(y.value_counts()) >= 2) else None
+            X_train, X_test, y_train, y_test = train_test_split(X_text, y, test_size=0.2, stratify=stratify_y)
+            
+            vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+            X_train_vec = vectorizer.fit_transform(X_train)
+            X_test_vec = vectorizer.transform(X_test)
+            
+            model = LogisticRegression(max_iter=100)
+            model.fit(X_train_vec, y_train)
+            accuracy = model.score(X_test_vec, y_test)
+            
+            return {
+                "baseline_method": "LogisticRegression + TF-IDF (80/20 split)",
+                "accuracy_score": float(accuracy),
+                "is_sufficient": bool(accuracy > 0.90),
+                "message": f"Baseline classifier achieved {accuracy*100:.1f}% accuracy on a 20% hold-out set."
+            }
         except Exception as e:
             pass
             
@@ -51,6 +65,25 @@ def run_baselines(df: pd.DataFrame, input_col: str, output_col: str, execution_m
         "message": "No fast baseline could confidently solve this task."
     }
 
+def estimate_resources(valid_rows: int, avg_input_len: float, avg_output_len: float, execution_mode: str) -> dict:
+    approx_tokens_per_row = (avg_input_len + avg_output_len) / 4.0
+    total_tokens = int(valid_rows * approx_tokens_per_row)
+    
+    base_est = {"estimated_tokens": total_tokens}
+    
+    if execution_mode == "classifier":
+        base_est.update({"expected_runtime": "< 1 min", "expected_ram": "500 MB", "expected_disk": "10 MB", "expected_artifact_size": "< 1 MB"})
+    elif execution_mode == "extractor":
+        base_est.update({"expected_runtime": "5 mins", "expected_ram": "1 GB", "expected_disk": "50 MB", "expected_artifact_size": "< 1 MB"})
+    elif execution_mode == "rag":
+        base_est.update({"expected_runtime": f"{max(1, int(total_tokens / 10000))} mins", "expected_ram": "2 GB", "expected_disk": f"{max(10, int(total_tokens / 1000))} MB", "expected_artifact_size": f"{max(10, int(total_tokens / 1000))} MB"})
+    elif execution_mode == "lora_sft":
+        base_est.update({"expected_runtime": f"{max(30, int(total_tokens / 5000))} mins", "expected_ram": "12 GB", "expected_disk": "8 GB", "expected_artifact_size": "200 MB"})
+    else:
+        base_est.update({"expected_runtime": "0 mins", "expected_ram": "0 MB", "expected_disk": "0 MB", "expected_artifact_size": "0 MB"})
+        
+    return base_est
+
 def generate_training_plan(df: pd.DataFrame, input_col: str, output_col: str) -> Dict[str, Any]:
     """
     Intelligent Task Router: Analyzes the dataset and generates a strict execution plan.
@@ -67,6 +100,9 @@ def generate_training_plan(df: pd.DataFrame, input_col: str, output_col: str) ->
         
     df['output_len'] = df[output_col].astype(str).str.len()
     avg_output_len = df['output_len'].mean()
+    df['input_len'] = df[input_col].astype(str).str.len()
+    avg_input_len = df['input_len'].mean()
+    
     unique_outputs = df[output_col].nunique()
     
     # Check for imbalance
@@ -75,12 +111,19 @@ def generate_training_plan(df: pd.DataFrame, input_col: str, output_col: str) ->
         if val_counts.max() > (val_counts.min() * 10):
             quality_flags.append("Severe class imbalance detected.")
             
-    # Default Budget
-    budget = {
-        "max_rows": min(valid_rows, 10000),
-        "max_epochs": 3,
-        "max_time_mins": 60
-    }
+    # Check for duplicates
+    duplicates = df.duplicated(subset=[input_col, output_col]).sum()
+    if valid_rows > 0 and (duplicates / valid_rows) > 0.5:
+        return {
+            "task_type": "unknown",
+            "execution_mode": "manual_review",
+            "recommended_approach": "Human Review",
+            "confidence": 0.20,
+            "should_train": False,
+            "dataset_quality_flags": quality_flags + ["Dataset is 50%+ duplicates."],
+            "reasoning": "I cannot confidently determine the best approach due to extreme data duplication. Review required.",
+            "resource_estimates": estimate_resources(valid_rows, avg_input_len, avg_output_len, "manual_review")
+        }
             
     # 2. Hard Routing Rules
     
@@ -92,73 +135,64 @@ def generate_training_plan(df: pd.DataFrame, input_col: str, output_col: str) ->
             "recommended_approach": "Prompt Engineering",
             "confidence": 0.98,
             "should_train": False,
-            "estimated_time": "0 mins",
-            "estimated_cost": "$0.00",
             "dataset_quality_flags": quality_flags + ["Dataset is too small for reliable fine-tuning."],
             "reasoning": f"You only have {valid_rows} valid examples. LLMs require hundreds of examples to learn format reliably. Use few-shot prompting instead.",
-            "budget_limits": budget
+            "resource_estimates": estimate_resources(valid_rows, avg_input_len, avg_output_len, "no_train")
         }
         
     # Rule B: Structured Data Extraction (JSON)
     sample_outputs = df[output_col].head(10).astype(str).tolist()
     looks_like_json = any(s.strip().startswith('{') and s.strip().endswith('}') for s in sample_outputs)
     if looks_like_json:
-        return {
+        plan = {
             "task_type": "structured_extraction",
             "execution_mode": "extractor",
             "recommended_approach": "Schema Extractor Model",
             "confidence": 0.92,
             "should_train": True,
-            "estimated_time": "5-10 mins",
-            "estimated_cost": "$0.05",
             "dataset_quality_flags": quality_flags,
             "reasoning": "Output is formatted as JSON. We will route this to a lightweight schema-extraction model rather than a conversational LLM.",
-            "budget_limits": budget
+            "resource_estimates": estimate_resources(valid_rows, avg_input_len, avg_output_len, "extractor")
         }
         
     # Rule C: Classification (Fixed labels)
-    if unique_outputs <= 30 and avg_output_len < 100:
-        return {
+    elif unique_outputs <= 30 and avg_output_len < 100:
+        plan = {
             "task_type": "classification",
             "execution_mode": "classifier",
             "recommended_approach": "Small Classifier (scikit-learn / XGBoost)",
             "confidence": 0.95,
             "should_train": True,
-            "estimated_time": "< 1 min",
-            "estimated_cost": "$0.00",
             "dataset_quality_flags": quality_flags,
             "reasoning": f"Output consists of {unique_outputs} fixed categories. A small classifier is 100x faster and more accurate than LLM fine-tuning for this task.",
-            "budget_limits": budget
+            "resource_estimates": estimate_resources(valid_rows, avg_input_len, avg_output_len, "classifier")
         }
         
     # Rule D: Retrieval / RAG (Very long outputs)
-    if avg_output_len > 1000:
-        return {
+    elif avg_output_len > 1000:
+        plan = {
             "task_type": "document_qa",
             "execution_mode": "rag",
             "recommended_approach": "Retrieval-Augmented Generation (RAG)",
             "confidence": 0.88,
             "should_train": False,
-            "estimated_time": "0 mins (Indexing time varies)",
-            "estimated_cost": "$0.00",
             "dataset_quality_flags": quality_flags + ["Outputs are extremely long."],
             "reasoning": "The target outputs are very long documents. Fine-tuning models to memorize long text is inefficient; use RAG to index and retrieve this knowledge.",
-            "budget_limits": budget
+            "resource_estimates": estimate_resources(valid_rows, avg_input_len, avg_output_len, "rag")
         }
         
     # Rule E: Conversational / Instruction Tuning
-    plan = {
-        "task_type": "instruction_tuning",
-        "execution_mode": "lora_sft",
-        "recommended_approach": "LoRA Supervised Fine-Tuning",
-        "confidence": 0.85,
-        "should_train": True,
-        "estimated_time": "1-4 hours (CPU)",
-        "estimated_cost": "Local CPU",
-        "dataset_quality_flags": quality_flags,
-        "reasoning": "Data follows a conversational instruction-response pattern with sufficient volume. Suitable for LoRA fine-tuning.",
-        "budget_limits": budget
-    }
+    else:
+        plan = {
+            "task_type": "instruction_tuning",
+            "execution_mode": "lora_sft",
+            "recommended_approach": "LoRA Supervised Fine-Tuning",
+            "confidence": 0.85,
+            "should_train": True,
+            "dataset_quality_flags": quality_flags,
+            "reasoning": "Data follows a conversational instruction-response pattern with sufficient volume. Suitable for LoRA fine-tuning.",
+            "resource_estimates": estimate_resources(valid_rows, avg_input_len, avg_output_len, "lora_sft")
+        }
     
     # 3. Baseline Checker
     baselines = run_baselines(df, input_col, output_col, plan["execution_mode"])
