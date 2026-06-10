@@ -464,14 +464,14 @@ async def research_query(req: ResearchQueryRequest):
         blocks = []
         for i, (doc, meta) in enumerate(zip(docs, metas)):
             page = meta.get("page", "?")
-            # Truncate extremely long chunks to prevent CPU attention from hanging
-            truncated_doc = doc[:1500] + "..." if len(doc) > 1500 else doc
+            # Aggressively truncate chunks to prevent massive CPU latency
+            truncated_doc = doc[:800] + "..." if len(doc) > 800 else doc
             blocks.append(f"Chunk {i+1} [Page {page}]:\n{truncated_doc}")
         return "\n\n".join(blocks)
 
     # 1. Initial Retrieval
     initial_res = collection.query(
-        query_texts=[req.query], n_results=3, where={"document_id": req.document_id}
+        query_texts=[req.query], n_results=2, where={"document_id": req.document_id}
     )
     docs = initial_res.get("documents", [[]])[0]
     metas = initial_res.get("metadatas", [[]])[0]
@@ -488,12 +488,12 @@ async def research_query(req: ResearchQueryRequest):
     if gap_text.upper().startswith("NO"):
         missing_query = gap_text[3:].strip()
         sec_res = collection.query(
-            query_texts=[missing_query], n_results=2, where={"document_id": req.document_id}
+            query_texts=[missing_query], n_results=1, where={"document_id": req.document_id}
         )
-        # Append unique chunks (max 5 total to save CPU time)
+        # Append unique chunks (max 3 total to save CPU time)
         existing_docs = set(docs)
         for d, m in zip(sec_res.get("documents", [[]])[0], sec_res.get("metadatas", [[]])[0]):
-            if d not in existing_docs and len(docs) < 5:
+            if d not in existing_docs and len(docs) < 3:
                 docs.append(d)
                 metas.append(m)
                 existing_docs.add(d)
@@ -518,7 +518,7 @@ Evidence Context:
 User Query: {req.query}"""
 
     syn_res = await run_inference(
-        artifact_id="base", input_data=syn_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=512
+        artifact_id="base", input_data=syn_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=256
     )
     raw_output = syn_res["output"]
     
