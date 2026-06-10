@@ -162,13 +162,12 @@ const ResearchAssistant = () => {
       console.error(err);
     }
 
-    // Fix async state bug: build conversation history using the NEW array directly
-    const newMessages = [...messages, { role: 'user', content: userMessage }];
+    // UI Updates
     setMessages(prev => [...prev, { role: 'user', content: userMessage }, { role: 'assistant', content: '...' }]);
-    
-    const conversationHistory = newMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
-    const finalPrompt = `${promptContext}User: ${userMessage}\n`;
-    worker.current.postMessage({ type: 'generate', text: `${conversationHistory}\n${finalPrompt}` });
+
+    // Exclude the '...' placeholder and previous conversation history to prevent hallucination drift
+    const finalPrompt = `${promptContext}User Question: ${userMessage}\n`;
+    worker.current.postMessage({ type: 'generate', text: finalPrompt });
   };
 
   return (
