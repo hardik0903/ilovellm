@@ -24,58 +24,67 @@ const Hero = () => (
   </header>
 );
 
-const ToolCard = ({ icon: Icon, title, description, path }) => {
+const ToolCard = ({ img, title, description, path }) => {
   const navigate = useNavigate();
   return (
-    <div className="tool-card" onClick={() => path && navigate(path)}>
-      <div className="icon-container">
-        <Icon size={48} strokeWidth={1.5} />
+    <div 
+      onClick={() => path && navigate(path)}
+      style={{ 
+        backgroundColor: 'white', borderRadius: '16px', overflow: 'hidden', 
+        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', cursor: 'pointer',
+        transition: 'transform 0.2s', border: '1px solid #e2e8f0'
+      }}
+      onMouseOver={e => e.currentTarget.style.transform = 'translateY(-5px)'}
+      onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+    >
+      <img src={img} alt={title} style={{ width: '100%', height: '200px', objectFit: 'cover', borderBottom: '1px solid #e2e8f0' }} />
+      <div style={{ padding: '1.5rem' }}>
+        <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', color: '#1e293b' }}>{title}</h3>
+        <p style={{ margin: 0, color: '#64748b' }}>{description}</p>
       </div>
-      <h3>{title}</h3>
-      <p>{description}</p>
     </div>
   );
 };
 
 const tools = [
   {
-    icon: Globe,
+    img: "/Photos/WebScraper.png",
     title: "Web Scraper",
     description: "Extract data from any website. Bypasses CAPTCHAs and handles dynamic content locally.",
     path: "/scrape"
   },
   {
-    icon: FileText,
+    img: "/Photos/DocumentIngestion.png",
     title: "Document Ingestion",
     description: "Parse PDFs, Docs, and CSVs. Smart chunking and metadata extraction made easy.",
     path: "/ingest"
   },
   {
-    icon: Database,
+    img: "/Photos/VectorStore.png",
     title: "Vector DB (Chroma)",
     description: "Semantic search engine to query your scraped and parsed data instantly.",
     path: "/vectordb"
   },
   {
-    icon: MessageSquare,
+    img: "/Photos/ChatWithData.png",
     title: "Chat with Data",
     description: "Ask questions about your scraped data or ingested documents seamlessly.",
     path: "/nlp"
   },
   {
-    icon: Search,
+    img: "/Photos/WebSearchAPI.png",
     title: "Web Search API",
     description: "Perform large-scale search queries and aggregate results without paid APIs.",
     path: "/search"
   },
   {
-    icon: Code,
+    img: "/Photos/DeveloperSDKs.png",
     title: "Developer SDKs",
     description: "Integrate the ilovellm pipeline directly into your Python or Node.js applications.",
     path: "/sdk"
   },
   {
-    icon: Lock,
+    img: "/Photos/100%OfflineMode.png",
     title: "100% Offline Mode",
     description: "Keep your data secure. Zero data leaves your machine. GDPR compliant.",
     path: "/offline"
@@ -157,11 +166,11 @@ const Dashboard = () => {
         <h2 style={{ fontSize: '2rem', color: '#2d3748' }}>Underlying Primitive Tools</h2>
         <p style={{ color: '#718096' }}>Build your own pipelines using our core services.</p>
       </div>
-      <main className="tool-grid">
+      <main style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', maxWidth: '1200px', margin: '0 auto', padding: '0 2rem 4rem 2rem' }}>
         {tools.map((tool, index) => (
           <ToolCard 
             key={index} 
-            icon={tool.icon} 
+            img={tool.img} 
             title={tool.title} 
             description={tool.description} 
             path={tool.path}

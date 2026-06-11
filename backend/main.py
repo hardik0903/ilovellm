@@ -28,6 +28,8 @@ from scraper import scrape_static, scrape_dynamic, scrape_authenticated, init_br
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 
+# price_intel removed
+
 # Initialize ChromaDB with BGE embeddings for scientific text
 chroma_client = chromadb.PersistentClient(path="./chroma_storage")
 bge_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -124,10 +126,39 @@ jobstores = {
 }
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 
+from price_intel.db import Base, engine, get_db, SessionLocal
+from price_intel.routes import router as price_intel_router
+
+def run_refresh_sync():
+    import asyncio
+    from price_intel.service import refresh_all_tracked_products
+    db = SessionLocal()
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(refresh_all_tracked_products(db))
+        else:
+            loop.run_until_complete(refresh_all_tracked_products(db))
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    print("Initializing Database Schemas...")
+    Base.metadata.create_all(bind=engine)
     await init_browser()
+    
+    # Schedule Price Intel job
+    scheduler.add_job(
+        run_refresh_sync,
+        'interval',
+        minutes=30,
+        id='price_intel_refresh',
+        replace_existing=True,
+        misfire_grace_time=60
+    )
+    
     scheduler.start()
     yield
     # Shutdown
@@ -135,6 +166,7 @@ async def lifespan(app: FastAPI):
     await close_browser()
 
 app = FastAPI(title="ilovellm Advanced Ingestion Service", lifespan=lifespan)
+app.include_router(price_intel_router)
 
 # Allow CORS for local frontend
 app.add_middleware(
@@ -732,3 +764,8 @@ def web_search(req: SearchRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# ==========================================
+# PRICE INTELLIGENCE ENDPOINTS
+# ==========================================
+
+app.include_router(price_intel_router)

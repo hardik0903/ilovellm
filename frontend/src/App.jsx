@@ -15,7 +15,8 @@ import OfflinePage from './pages/OfflinePage';
 
 // Automated Apps
 import ResearchAssistant from './pages/apps/ResearchAssistant';
-import { EcommercePrice, JobMarket, LegalAnalyzer, NewsAggregator, CustomerReview, GovernmentMonitor } from './pages/apps/Placeholders';
+import { PriceIntelligence } from './pages/apps/PriceIntelligence';
+import { JobMarket, LegalAnalyzer, NewsAggregator, CustomerReview, GovernmentMonitor } from './pages/apps/Placeholders';
 
 function App() {
   return (
@@ -37,7 +38,7 @@ function App() {
             
             {/* Automated Apps */}
             <Route path="/app/research" element={<ResearchAssistant />} />
-            <Route path="/app/ecommerce" element={<EcommercePrice />} />
+            <Route path="/app/ecommerce" element={<PriceIntelligence />} />
             <Route path="/app/jobs" element={<JobMarket />} />
             <Route path="/app/legal" element={<LegalAnalyzer />} />
             <Route path="/app/news" element={<NewsAggregator />} />
