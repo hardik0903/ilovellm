@@ -68,3 +68,33 @@ def get_metrics(db: Session = Depends(get_db)):
         "active_listings": db.query(SourceListing).count(),
         "price_drops_24h": 0 # MVP placeholder
     }
+
+@router.get("/debug/{listing_id}")
+def debug_listing(listing_id: int, db: Session = Depends(get_db)):
+    from .models import PriceEvent
+    listing = db.query(SourceListing).filter(SourceListing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+        
+    latest_obs = db.query(PriceObservation).filter(
+        PriceObservation.listing_id == listing_id
+    ).order_by(PriceObservation.observed_at.desc()).first()
+    
+    latest_attempt = db.query(ScrapeAttempt).filter(
+        ScrapeAttempt.listing_id == listing_id
+    ).order_by(ScrapeAttempt.attempted_at.desc()).first()
+    
+    latest_event = db.query(PriceEvent).filter(
+        PriceEvent.listing_id == listing_id
+    ).order_by(PriceEvent.detected_at.desc()).first()
+    
+    return {
+        "listing": {
+            "id": listing.id,
+            "status": listing.latest_scrape_status,
+            "price": listing.current_price
+        },
+        "latest_observation": latest_obs,
+        "latest_attempt": latest_attempt,
+        "latest_event": latest_event
+    }

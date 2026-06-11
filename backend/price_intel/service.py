@@ -4,6 +4,7 @@ from .models import Product, SourceListing, PriceObservation, ScrapeAttempt
 from .connectors import get_connector
 from .normalizer import normalize_listing
 from .matcher import find_best_product_match
+from .detector import detect_changes
 
 async def track_product_url(db: Session, url: str) -> int:
     """Creates a new tracked product from a URL with Entity Resolution."""
@@ -83,11 +84,20 @@ async def track_product_url(db: Session, url: str) -> int:
         obs = PriceObservation(
             listing_id=listing.id,
             observed_price=result.price,
-            observed_mrp=result.mrp
+            observed_mrp=result.mrp,
+            observed_discount_percent=result.discount_percent,
+            observed_shipping_cost=result.shipping_cost,
+            observed_stock_status=result.availability,
+            observed_seller_name=result.seller_name
         )
         db.add(obs)
         
     db.commit()
+    
+    events = detect_changes(db, listing.id)
+    if events:
+        db.add_all(events)
+        db.commit()
     
     return product_id
 
@@ -110,17 +120,30 @@ async def run_scrape_for_listing(db: Session, listing: SourceListing):
     if result.status == "success" and result.price is not None:
         listing.current_price = result.price
         listing.mrp = result.mrp
+        listing.discount_percent = result.discount_percent
+        listing.shipping_cost = result.shipping_cost
+        listing.stock_status = result.availability
+        listing.seller_name = result.seller_name
         if result.title:
             listing.title = result.title
         
         obs = PriceObservation(
             listing_id=listing.id,
             observed_price=result.price,
-            observed_mrp=result.mrp
+            observed_mrp=result.mrp,
+            observed_discount_percent=result.discount_percent,
+            observed_shipping_cost=result.shipping_cost,
+            observed_stock_status=result.availability,
+            observed_seller_name=result.seller_name
         )
         db.add(obs)
         
     db.commit()
+    
+    events = detect_changes(db, listing.id)
+    if events:
+        db.add_all(events)
+        db.commit()
 
 async def refresh_all_tracked_products(db: Session):
     listings = db.query(SourceListing).all()

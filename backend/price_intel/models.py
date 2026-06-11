@@ -66,6 +66,7 @@ class PriceObservation(Base):
     observed_discount_percent = Column(Float, nullable=True)
     observed_shipping_cost = Column(Float, nullable=True)
     observed_stock_status = Column(String, nullable=True)
+    observed_seller_name = Column(String, nullable=True)
     
     observed_at = Column(DateTime(timezone=True), server_default=func.now())
     raw_snapshot_json = Column(JSON, nullable=True)
@@ -87,3 +88,24 @@ class ScrapeAttempt(Base):
     duration_ms = Column(Integer, nullable=True)
     
     listing = relationship("SourceListing", back_populates="attempts")
+
+class PriceEvent(Base):
+    __tablename__ = "price_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"))
+    listing_id = Column(Integer, ForeignKey("source_listings.id"))
+    
+    event_type = Column(String, index=True)  # price_drop, price_increase, stock_changed, seller_changed, scrape_failed
+    old_value = Column(String, nullable=True)
+    new_value = Column(String, nullable=True)
+    
+    delta_value = Column(Float, nullable=True)
+    delta_percent = Column(Float, nullable=True)
+    
+    severity = Column(String, nullable=True) # low, medium, high
+    detected_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    metadata_json = Column(JSON, nullable=True)
+
+    listing = relationship("SourceListing")
+    product = relationship("Product")
