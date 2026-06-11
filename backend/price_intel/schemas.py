@@ -47,9 +47,15 @@ class PriceObservationResponse(BaseModel):
 
 class PriceObservationSchema(BaseModel):
     id: int
+    listing_id: int
     observed_price: float
     observed_mrp: Optional[float] = None
     observed_at: datetime
+    
+    # We will compute these in the route for the UI
+    source_name: Optional[str] = None
+    seller_name: Optional[str] = None
+    stock_status: Optional[str] = None
 
     class Config:
         from_attributes = True

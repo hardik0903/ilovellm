@@ -93,7 +93,7 @@ export function ProductTable({ products, onRefreshList, onSelectProduct, selecte
                 )}
               </td>
               <td style={{ padding: '1rem 1.5rem' }}>
-                <StatusBadge status={listing?.stock_status} />
+                <StatusBadge status={listing?.latest_scrape_status === 'success' ? listing?.stock_status : listing?.latest_scrape_status} />
               </td>
               <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
                 {listing && (

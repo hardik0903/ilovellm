@@ -30,5 +30,21 @@ export const priceIntelApi = {
   getHistory: async (productId) => {
     const res = await axios.get(`${API_BASE}/history/${productId}`);
     return res.data;
+  },
+  getAlerts: async () => {
+    const res = await axios.get(`${API_BASE}/alerts`);
+    return res.data;
+  },
+  resolveAlerts: async (alertIds) => {
+    const res = await axios.post(`${API_BASE}/alerts/seen`, { alert_ids: alertIds });
+    return res.data;
+  },
+  getRules: async (productId) => {
+    const res = await axios.get(`${API_BASE}/rules/${productId}`);
+    return res.data;
+  },
+  createRule: async (data) => {
+    const res = await axios.post(`${API_BASE}/rules`, data);
+    return res.data;
   }
 };

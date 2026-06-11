@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { ProductForm } from '../../components/price-intel/ProductForm';
 import { ProductTable } from '../../components/price-intel/ProductTable';
 import { PriceHistoryChart } from '../../components/price-intel/PriceHistoryChart';
+import { AlertFeed } from '../../components/price-intel/AlertFeed';
+import { AlertRuleForm } from '../../components/price-intel/AlertRuleForm';
 import { priceIntelApi } from '../../services/priceIntelApi';
-import { Package, Activity, TrendingDown, ShoppingCart } from 'lucide-react';
+import { Package, Activity, TrendingDown, ShoppingCart, Bell } from 'lucide-react';
 
 export function PriceIntelligence() {
   const [products, setProducts] = useState([]);
@@ -44,50 +46,54 @@ export function PriceIntelligence() {
   };
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '4rem auto', padding: '0 2rem', fontFamily: "'Inter', sans-serif" }}>
+    <div className="max-w-[1400px] mx-auto py-12 px-8 font-sans">
       
       {/* Header Area */}
-      <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-        <ShoppingCart size={64} color="#304fba" style={{ marginBottom: '1rem' }} />
-        <h1 style={{ fontSize: '2.5rem', marginBottom: '1rem', color: '#2d3748', fontWeight: '800' }}>Price Intelligence</h1>
-        <p style={{ color: '#718096', fontSize: '1.2rem', maxWidth: '700px', margin: '0 auto' }}>
-          Real-time competitor tracking and intelligent market analysis.
+      <div className="text-center mb-10">
+        <div className="flex justify-center mb-4">
+          <div className="p-4 bg-blue-50 rounded-full">
+            <ShoppingCart size={48} className="text-blue-700" />
+          </div>
+        </div>
+        <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Price Intelligence</h1>
+        <p className="text-lg text-gray-500 max-w-2xl mx-auto">
+          Real-time competitor tracking, entity resolution, and autonomous anomaly detection.
         </p>
       </div>
 
       {/* Metrics Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
         <MetricCard 
           title="Tracked Products" 
           value={metrics.total_products} 
-          icon={<Package size={24} color="#304fba" />} 
-          trend="+12% this week" 
+          icon={<Package size={24} className="text-blue-600" />} 
+          trend="Entities matched" 
         />
         <MetricCard 
           title="Active Listings" 
           value={metrics.active_listings} 
-          icon={<Activity size={24} color="#304fba" />} 
-          trend="All sources healthy" 
+          icon={<Activity size={24} className="text-blue-600" />} 
+          trend="Scraping across sources" 
         />
         <MetricCard 
           title="Price Drops (24h)" 
           value={metrics.price_drops_24h} 
-          icon={<TrendingDown size={24} color="#38a169" />} 
+          icon={<TrendingDown size={24} className="text-green-600" />} 
           trend="Opportunities detected" 
-          highlightColor="#38a169"
+          highlightColor="text-green-600"
         />
       </div>
 
       {/* Main Interface */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
         
-        {/* Left Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        {/* Left Column (Main Content) */}
+        <div className="xl:col-span-8 flex flex-col gap-8">
           <ProductForm onProductAdded={loadData} />
           
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ backgroundColor: '#f8f9fa', padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0' }}>
-              <strong style={{ color: '#2d3748', fontSize: '1.1rem' }}>Monitored Portfolio</strong>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <strong className="text-gray-800 text-lg">Monitored Portfolio</strong>
             </div>
             <ProductTable 
               products={products} 
@@ -96,35 +102,42 @@ export function PriceIntelligence() {
               selectedProductId={selectedProduct?.id}
             />
           </div>
-        </div>
-        
-        {/* Right Column */}
-        <div>
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', padding: '1.5rem', position: 'sticky', top: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <strong style={{ color: '#2d3748', fontSize: '1.1rem' }}>
-                {selectedProduct ? 'Trend Analysis' : 'Select a product'}
-              </strong>
-              {selectedProduct && (
-                <span style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.85rem', fontWeight: 'bold' }}>
+
+          {selectedProduct && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex justify-between items-center mb-6">
+                <strong className="text-gray-800 text-lg">Trend Analysis</strong>
+                <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm font-bold">
                   {selectedProduct.name}
                 </span>
-              )}
-            </div>
-            
-            <PriceHistoryChart data={history} />
-            
-            {selectedProduct && (
-              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e2e8f0' }}>
-                <strong style={{ color: '#718096', fontSize: '0.85rem', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>AI Insights</strong>
-                <div style={{ backgroundColor: '#f8f9fa', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <p style={{ margin: 0, color: '#4a5568', fontSize: '0.9rem', lineHeight: '1.5' }}>
-                    Price is currently stable. Based on historical trends, expect potential discounts during upcoming merchant sale events.
-                  </p>
-                </div>
               </div>
-            )}
+              <PriceHistoryChart data={history} />
+            </div>
+          )}
+        </div>
+        
+        {/* Right Column (Sidebar) */}
+        <div className="xl:col-span-4 flex flex-col gap-8">
+          
+          {/* Alert Feed Widget */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden sticky top-8">
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex items-center gap-2">
+              <Bell size={20} className="text-gray-600" />
+              <strong className="text-gray-800 text-lg">Live Alerts</strong>
+            </div>
+            <div className="p-4 max-h-[400px] overflow-y-auto">
+              <AlertFeed />
+            </div>
           </div>
+
+          {/* Rule Configuration Panel */}
+          {selectedProduct && (
+            <AlertRuleForm 
+              productId={selectedProduct.id} 
+              onRuleAdded={() => {}} 
+            />
+          )}
+          
         </div>
         
       </div>
@@ -132,19 +145,19 @@ export function PriceIntelligence() {
   );
 }
 
-function MetricCard({ title, value, icon, trend, highlightColor = "#2d3748" }) {
+function MetricCard({ title, value, icon, trend, highlightColor = "text-gray-900" }) {
   return (
-    <div style={{ backgroundColor: '#fff', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-        <div style={{ padding: '0.75rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm transition-transform hover:-translate-y-1 duration-200">
+      <div className="flex items-center gap-4 mb-4">
+        <div className="p-3 bg-gray-50 rounded-lg">
           {icon}
         </div>
-        <div style={{ color: '#718096', fontWeight: '600' }}>{title}</div>
+        <div className="text-gray-500 font-semibold">{title}</div>
       </div>
-      <div style={{ fontSize: '2.5rem', fontWeight: '800', marginBottom: '0.5rem', color: highlightColor }}>
+      <div className={`text-4xl font-extrabold mb-2 ${highlightColor}`}>
         {value}
       </div>
-      <div style={{ fontSize: '0.9rem', color: '#a0aec0', fontWeight: '500' }}>
+      <div className="text-sm text-gray-400 font-medium">
         {trend}
       </div>
     </div>

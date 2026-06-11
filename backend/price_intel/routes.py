@@ -50,15 +50,21 @@ async def manual_scrape(listing_id: int, db: Session = Depends(get_db)):
     await run_scrape_for_listing(db, listing)
     return {"success": True}
 
-@router.get("/history/{product_id}", response_model=List[PriceObservationResponse])
+@router.get("/history/{product_id}", response_model=List[PriceObservationSchema])
 def get_price_history(product_id: int, db: Session = Depends(get_db)):
     listings = db.query(SourceListing).filter(SourceListing.product_id == product_id).all()
-    listing_ids = [l.id for l in listings]
+    listing_map = {l.id: l for l in listings}
     
     observations = db.query(PriceObservation).filter(
-        PriceObservation.listing_id.in_(listing_ids)
+        PriceObservation.listing_id.in_(listing_map.keys())
     ).order_by(PriceObservation.observed_at.asc()).all()
     
+    for obs in observations:
+        listing = listing_map.get(obs.listing_id)
+        obs.source_name = listing.source_name if listing else "unknown"
+        obs.seller_name = obs.observed_seller_name
+        obs.stock_status = obs.observed_stock_status
+        
     return observations
 
 @router.get("/dashboard/metrics")
