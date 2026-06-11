@@ -11,6 +11,18 @@ from playwright.async_api import async_playwright, Browser, Playwright
 import uuid
 import io
 import pdfplumber
+import re
+
+def normalize_arxiv_url(url: str) -> str:
+    """Convert arXiv abstract URLs to PDF URLs.
+    
+    Matches https://arxiv.org/abs/<id> and converts to https://arxiv.org/pdf/<id>.
+    Returns the original URL if no match.
+    """
+    match = re.match(r'https?://arxiv\.org/abs/(\d+\.\d+)', url)
+    if match:
+        return f'https://arxiv.org/pdf/{match.group(1)}'
+    return url
 
 # Initialize SQLite Cache for Change Detection
 conn = sqlite3.connect('scraper_cache.db', check_same_thread=False)
@@ -175,6 +187,7 @@ async def _check_robots_and_cache(url: str, force_refresh: bool, ignore_robots: 
 
 async def scrape_static(url: str, force_refresh: bool = False, ignore_robots: bool = False):
     """ Service 1: Static Website Scraping """
+    url = normalize_arxiv_url(url)
     err, cached = await _check_robots_and_cache(url, force_refresh, ignore_robots)
     if err: return err
 

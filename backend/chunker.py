@@ -147,13 +147,48 @@ def semantic_chunking(paragraphs: List[str], threshold: float = 0.3) -> List[str
         print("scikit-learn not installed, falling back to fixed size chunking")
         return fixed_size_chunking(" ".join(paragraphs))
 
-def apply_chunking(text_or_elements, strategy="sentence", **kwargs):
+def recursive_overlap_chunking(text: str, chunk_size: int = 400, overlap: int = 80) -> list[dict]:
+    """Splits text into overlapping chunks by words.
+    
+    Each chunk overlaps with the previous one by `overlap` words.
+    Returns a list of dicts with keys: text, chunk_index, word_start, word_end.
+    """
+    words = text.split()
+    chunks = []
+    
+    if not words:
+        return []
+    
+    step = chunk_size - overlap
+    if step <= 0:
+        step = 1  # safety: ensure forward progress
+    
+    chunk_index = 0
+    for i in range(0, len(words), step):
+        word_start = i
+        word_end = min(i + chunk_size, len(words))
+        chunk_text = " ".join(words[word_start:word_end])
+        chunks.append({
+            "text": chunk_text,
+            "chunk_index": chunk_index,
+            "word_start": word_start,
+            "word_end": word_end,
+        })
+        chunk_index += 1
+        if word_end >= len(words):
+            break
+    
+    return chunks
+
+def apply_chunking(text_or_elements, strategy="recursive_overlap", **kwargs):
     if strategy == "fixed":
         return fixed_size_chunking(text_or_elements, **kwargs)
     elif strategy == "paragraph":
         return paragraph_chunking(text_or_elements)
     elif strategy == "sentence":
         return sentence_aware_chunking(text_or_elements, **kwargs)
+    elif strategy == "recursive_overlap":
+        return recursive_overlap_chunking(text_or_elements, **kwargs)
     elif strategy == "heading":
         return heading_aware_chunking(text_or_elements)
     elif strategy == "semantic":

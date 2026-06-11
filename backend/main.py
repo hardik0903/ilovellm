@@ -10,9 +10,14 @@ import pdfplumber
 import base64
 import io
 import os
+import json
+import re
+import pickle
 import zipfile
 import httpx
 import chromadb
+from chromadb.utils import embedding_functions
+from rank_bm25 import BM25Okapi
 from ingester import ingest_file, parse_youtube
 from chunker import apply_chunking
 from duckduckgo_search import DDGS
@@ -20,9 +25,96 @@ from scraper import scrape_static, scrape_dynamic, scrape_authenticated, init_br
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 
-# Initialize ChromaDB local storage
+# Initialize ChromaDB with BGE embeddings for scientific text
 chroma_client = chromadb.PersistentClient(path="./chroma_storage")
-collection = chroma_client.get_or_create_collection(name="ilovellm_documents")
+bge_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="BAAI/bge-small-en-v1.5"
+)
+collection = chroma_client.get_or_create_collection(
+    name="ilovellm_documents_v2",
+    embedding_function=bge_ef
+)
+
+# ==========================================
+# BM25 + HYBRID RETRIEVAL UTILITIES
+# ==========================================
+os.makedirs("./bm25_cache", exist_ok=True)
+INDEX_REGISTRY_PATH = "./bm25_cache/index_registry.json"
+
+def _load_index_registry() -> dict:
+    if os.path.exists(INDEX_REGISTRY_PATH):
+        with open(INDEX_REGISTRY_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+def _save_index_registry(registry: dict):
+    with open(INDEX_REGISTRY_PATH, "w") as f:
+        json.dump(registry, f)
+
+def build_bm25_index(chunks: list, document_id: str):
+    """Build and persist a BM25 index for a document."""
+    texts = [c if isinstance(c, str) else c.get("text", "") for c in chunks]
+    texts = [t for t in texts if t.strip()]
+    if not texts:
+        return
+    tokenized = [t.lower().split() for t in texts]
+    bm25 = BM25Okapi(tokenized)
+    with open(f"./bm25_cache/{document_id}.pkl", "wb") as f:
+        pickle.dump((bm25, texts), f)
+    # Update registry
+    registry = _load_index_registry()
+    registry[document_id] = {"chunk_count": len(texts), "indexed": True}
+    _save_index_registry(registry)
+
+def hybrid_retrieve(query: str, document_id: str, top_k: int = 6):
+    """Hybrid BM25 + Dense retrieval with Reciprocal Rank Fusion."""
+    # Dense retrieval
+    dense_res = collection.query(
+        query_texts=[query], n_results=min(10, top_k * 2),
+        where={"document_id": document_id},
+        include=["documents", "metadatas", "distances"]
+    )
+    dense_docs = dense_res.get("documents", [[]])[0]
+    dense_metas = dense_res.get("metadatas", [[]])[0]
+    dense_dists = dense_res.get("distances", [[]])[0]
+    dense_rrf = {doc: 1.0 / (i + 1) for i, doc in enumerate(dense_docs)}
+
+    # BM25 retrieval
+    bm25_path = f"./bm25_cache/{document_id}.pkl"
+    bm25_rrf = {}
+    if os.path.exists(bm25_path):
+        with open(bm25_path, "rb") as f:
+            bm25, all_chunks = pickle.load(f)
+        raw_scores = bm25.get_scores(query.lower().split())
+        top_idx = sorted(range(len(raw_scores)), key=lambda i: -raw_scores[i])[:10]
+        bm25_rrf = {all_chunks[i]: 1.0 / (rank + 1) for rank, i in enumerate(top_idx)}
+
+    # RRF merge
+    all_doc_set = set(dense_rrf) | set(bm25_rrf)
+    rrf_scores = {d: dense_rrf.get(d, 0) + bm25_rrf.get(d, 0) for d in all_doc_set}
+    sorted_docs = sorted(rrf_scores, key=lambda d: -rrf_scores[d])[:top_k]
+
+    # Build metadata lookup from dense results
+    meta_lookup = {doc: meta for doc, meta in zip(dense_docs, dense_metas)}
+    result_metas = [meta_lookup.get(d, {}) for d in sorted_docs]
+
+    # Determine if second pass needed via cosine distance threshold
+    needs_second_pass = bool(dense_dists and dense_dists[0] > 0.55)
+    return sorted_docs, result_metas, needs_second_pass
+
+def trim_to_token_budget(docs: list, max_chars: int = 4000) -> list:
+    """Hard cap on total context length to prevent CPU attention explosion."""
+    trimmed = []
+    total = 0
+    for doc in docs:
+        if total + len(doc) > max_chars:
+            remaining = max_chars - total
+            if remaining > 100:
+                trimmed.append(doc[:remaining] + "...")
+            break
+        trimmed.append(doc)
+        total += len(doc)
+    return trimmed
 
 jobstores = {
     'default': SQLAlchemyJobStore(url='sqlite:///scraper_jobs.db')
@@ -188,7 +280,11 @@ async def ingest_advanced(
             for page_data in page_map:
                 page_chunks = apply_chunking(page_data['text'], strategy=chunking_strategy)
                 for c in page_chunks:
-                    chunks.append({"text": c, "page": page_data['page']})
+                    if isinstance(c, dict):
+                        c["page"] = page_data['page']
+                        chunks.append(c)
+                    else:
+                        chunks.append({"text": c, "page": page_data['page']})
             filename = url if url else "page_map_document"
         else:
             if url:
@@ -202,7 +298,7 @@ async def ingest_advanced(
                 raise HTTPException(status_code=400, detail="Must provide either file, url, or page_map_json")
                 
             raw_chunks = apply_chunking(text, strategy=chunking_strategy)
-            chunks = [{"text": c} for c in raw_chunks]
+            chunks = [c if isinstance(c, dict) else {"text": c} for c in raw_chunks]
         
         return {
             "success": True,
@@ -406,6 +502,12 @@ class QueryRequest(BaseModel):
 def vector_store(req: StoreRequest):
     import uuid
     
+    # Check embedding cache — skip if already indexed
+    if req.document_id:
+        registry = _load_index_registry()
+        if req.document_id in registry and registry[req.document_id].get("indexed"):
+            return {"success": True, "inserted": 0, "cached": True, "message": "Document already indexed."}
+    
     documents = []
     metadatas = []
     for i, chunk in enumerate(req.chunks):
@@ -414,6 +516,8 @@ def vector_store(req: StoreRequest):
             meta = {"source": req.source, "chunk_index": i}
             if req.document_id: meta["document_id"] = req.document_id
             if 'page' in chunk: meta["page"] = chunk['page']
+            if 'word_start' in chunk: meta["word_start"] = chunk['word_start']
+            if 'word_end' in chunk: meta["word_end"] = chunk['word_end']
             metadatas.append(meta)
         elif isinstance(chunk, str):
             documents.append(chunk)
@@ -431,6 +535,11 @@ def vector_store(req: StoreRequest):
         metadatas=metadatas,
         ids=ids
     )
+    
+    # Build BM25 index alongside dense storage
+    if req.document_id:
+        build_bm25_index(documents, req.document_id)
+    
     return {"success": True, "inserted": len(documents)}
 
 class QueryRequest(BaseModel):
@@ -454,88 +563,193 @@ class ResearchQueryRequest(BaseModel):
     query: str
     document_id: str
 
+def _format_numbered_evidence(docs, metas):
+    """Format chunks as numbered evidence blocks for traceable citations."""
+    blocks = []
+    for i, (doc, meta) in enumerate(zip(docs, metas)):
+        page = meta.get("page", "?")
+        truncated = doc[:1200]
+        blocks.append(f'[{i+1}] Page {page}: "{truncated}"')
+    return "\n\n".join(blocks)
+
+SYNTHESIS_PROMPT = """You are a research paper analyst. Answer ONLY from the numbered evidence passages below.
+If the answer is not in the passages, reply with {{"answer": "Not found in the paper.", "confidence": 0.0, "evidence_ids": []}}.
+
+Evidence:
+{evidence}
+
+Question: {question}
+
+Reply with ONLY valid JSON in this exact format:
+{{"answer": "...", "confidence": 0.8, "evidence_ids": [1, 2], "reasoning": "..."}}
+JSON:"""
+
 @app.post("/api/research/query")
 async def research_query(req: ResearchQueryRequest):
     from inference_manager import run_inference
-    import json
-    import re
     
-    def format_context(docs, metas):
-        blocks = []
-        for i, (doc, meta) in enumerate(zip(docs, metas)):
-            page = meta.get("page", "?")
-            # Aggressively truncate chunks to prevent massive CPU latency
-            truncated_doc = doc[:800] + "..." if len(doc) > 800 else doc
-            blocks.append(f"Chunk {i+1} [Page {page}]:\n{truncated_doc}")
-        return "\n\n".join(blocks)
-
-    # 1. Initial Retrieval
-    initial_res = collection.query(
-        query_texts=[req.query], n_results=3, where={"document_id": req.document_id}
-    )
-    docs = initial_res.get("documents", [[]])[0]
-    metas = initial_res.get("metadatas", [[]])[0]
+    # 1. Hybrid Retrieval (BM25 + Dense + RRF)
+    docs, metas, needs_second_pass = hybrid_retrieve(req.query, req.document_id, top_k=6)
     
-    # 2. Gap-Check Pass
-    gap_prompt = f"Query: {req.query}\n\nEvidence:\n{format_context(docs, metas)}\n\nDo you have enough evidence to answer? Reply ONLY 'YES' or 'NO: <missing search terms>'."
-    
-    gap_check = await run_inference(
-        artifact_id="base", input_data=gap_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=30
-    )
-    gap_text = gap_check["output"].strip()
-    
-    # 3. Second Retrieval if needed
-    if gap_text.upper().startswith("NO"):
-        missing_query = gap_text[3:].strip()
-        sec_res = collection.query(
-            query_texts=[missing_query], n_results=2, where={"document_id": req.document_id}
+    # 2. Deterministic gap-check via cosine distance threshold
+    interrogation_passes = 1
+    if needs_second_pass:
+        # Run a second retrieval pass with a rephrased query
+        rephrase_prompt = f"Rephrase this question using different keywords: {req.query}\nRephrased:"
+        rephrase_res = await run_inference(
+            artifact_id="base", input_data=rephrase_prompt,
+            is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=40
         )
-        # Append unique chunks (max 4 total to save CPU time)
-        existing_docs = set(docs)
-        for d, m in zip(sec_res.get("documents", [[]])[0], sec_res.get("metadatas", [[]])[0]):
-            if d not in existing_docs and len(docs) < 4:
-                docs.append(d)
-                metas.append(m)
-                existing_docs.add(d)
-
-    # 4. Synthesize
-    syn_prompt = f"""You are an AI Researcher answering a query based ONLY on the evidence below.
-Do NOT use outside knowledge. Do not hallucinate.
-If the evidence does not contain the answer, reply "Not found in the paper."
-
-Format your response exactly like this:
-ANSWER:
-<your answer here>
-
-EVIDENCE:
-<exact quote from the text>
-
-Evidence Context:
-{format_context(docs, metas)}
-
-User Query: {req.query}"""
-
+        rephrased = rephrase_res["output"].strip()
+        if rephrased and len(rephrased) > 5:
+            extra_docs, extra_metas, _ = hybrid_retrieve(rephrased, req.document_id, top_k=3)
+            existing = set(docs)
+            for d, m in zip(extra_docs, extra_metas):
+                if d not in existing and len(docs) < 8:
+                    docs.append(d)
+                    metas.append(m)
+                    existing.add(d)
+            interrogation_passes = 2
+    
+    # 3. Token budget hard cap
+    docs = trim_to_token_budget(docs, max_chars=4000)
+    metas = metas[:len(docs)]
+    
+    # 4. Synthesize with numbered evidence + JSON prompt
+    evidence_text = _format_numbered_evidence(docs, metas)
+    syn_prompt = SYNTHESIS_PROMPT.format(evidence=evidence_text, question=req.query)
+    
     syn_res = await run_inference(
-        artifact_id="base", input_data=syn_prompt, is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=256
+        artifact_id="base", input_data=syn_prompt,
+        is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=300
     )
     raw_output = syn_res["output"]
     
-    # 5. Validate / Parse Text format
-    answer_match = re.search(r'ANSWER:\s*(.*?)(?:EVIDENCE:|$)', raw_output, re.DOTALL | re.IGNORECASE)
-    evidence_match = re.search(r'EVIDENCE:\s*(.*)', raw_output, re.DOTALL | re.IGNORECASE)
+    # 5. Parse JSON response with robust fallback
+    parsed = None
+    try:
+        # Try to find JSON in the output
+        json_match = re.search(r'\{[^{}]*"answer"[^{}]*\}', raw_output, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group(0))
+        else:
+            parsed = json.loads(raw_output)
+    except Exception:
+        # Fallback: extract answer text and wrap in schema
+        answer_match = re.search(r'ANSWER:\s*(.*?)(?:EVIDENCE:|$)', raw_output, re.DOTALL | re.IGNORECASE)
+        ans_text = answer_match.group(1).strip() if answer_match else raw_output.strip()
+        parsed = {
+            "answer": ans_text,
+            "confidence": 0.0,
+            "evidence_ids": [],
+            "reasoning": "Failed to parse structured output."
+        }
     
-    ans_text = answer_match.group(1).strip() if answer_match else raw_output.strip()
-    ev_text = evidence_match.group(1).strip() if evidence_match else "N/A"
-    
-    parsed_json = {
-        "answer": ans_text,
-        "evidence": ev_text,
-        "citations": "Retrieved Context",
-        "confidence": "High" if "Not found" not in ans_text else "Low",
-        "abstain_reason": "Not found in evidence." if "Not found" in ans_text else ""
+    # Normalize output schema
+    result = {
+        "answer": parsed.get("answer", raw_output.strip()),
+        "confidence": parsed.get("confidence", 0.5),
+        "evidence_ids": parsed.get("evidence_ids", []),
+        "reasoning": parsed.get("reasoning", ""),
+        "evidence_blocks": [
+            {"id": i+1, "page": metas[i].get("page", "?"), "text": docs[i][:500]}
+            for i in range(len(docs))
+        ]
     }
+    
+    # 6. Faithfulness check — flag sentences not grounded in evidence
+    answer_sentences = [s.strip() for s in result["answer"].split(".") if s.strip()]
+    flagged = []
+    evidence_text_lower = " ".join(docs).lower()
+    for sent in answer_sentences:
+        # Check if key words from the sentence appear in evidence
+        words = [w.lower() for w in sent.split() if len(w) > 3]
+        if words:
+            overlap = sum(1 for w in words if w in evidence_text_lower) / len(words)
+            if overlap < 0.3:
+                flagged.append(sent)
+    result["faithfulness_flags"] = flagged
+    
+    return {
+        "success": True,
+        "data": result,
+        "interrogation_passes": interrogation_passes,
+        "metrics": syn_res.get("metrics", {})
+    }
+
+@app.post("/api/research/query/stream")
+async def research_query_stream(req: ResearchQueryRequest):
+    """SSE streaming endpoint for research queries."""
+    from inference_manager import run_inference
+    import asyncio
+    
+    async def event_stream():
+        # Phase 1: Retrieval
+        yield f'data: {{"phase": "retrieving"}}\n\n'
         
-    return {"success": True, "data": parsed_json, "interrogation_passes": 2 if gap_text.upper().startswith("NO") else 1}
+        docs, metas, needs_second_pass = hybrid_retrieve(req.query, req.document_id, top_k=6)
+        
+        if needs_second_pass:
+            yield f'data: {{"phase": "second_pass"}}\n\n'
+            rephrase_prompt = f"Rephrase this question using different keywords: {req.query}\nRephrased:"
+            rephrase_res = await run_inference(
+                artifact_id="base", input_data=rephrase_prompt,
+                is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=40
+            )
+            rephrased = rephrase_res["output"].strip()
+            if rephrased and len(rephrased) > 5:
+                extra_docs, extra_metas, _ = hybrid_retrieve(rephrased, req.document_id, top_k=3)
+                existing = set(docs)
+                for d, m in zip(extra_docs, extra_metas):
+                    if d not in existing and len(docs) < 8:
+                        docs.append(d)
+                        metas.append(m)
+                        existing.add(d)
+        
+        docs = trim_to_token_budget(docs, max_chars=4000)
+        metas = metas[:len(docs)]
+        
+        # Phase 2: Synthesis
+        yield f'data: {{"phase": "generating"}}\n\n'
+        
+        evidence_text = _format_numbered_evidence(docs, metas)
+        syn_prompt = SYNTHESIS_PROMPT.format(evidence=evidence_text, question=req.query)
+        
+        syn_res = await run_inference(
+            artifact_id="base", input_data=syn_prompt,
+            is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=300
+        )
+        raw_output = syn_res["output"]
+        
+        # Parse and stream result
+        parsed = None
+        try:
+            json_match = re.search(r'\{[^{}]*"answer"[^{}]*\}', raw_output, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+            else:
+                parsed = json.loads(raw_output)
+        except Exception:
+            parsed = {"answer": raw_output.strip(), "confidence": 0.0, "evidence_ids": [], "reasoning": ""}
+        
+        result = {
+            "answer": parsed.get("answer", raw_output.strip()),
+            "confidence": parsed.get("confidence", 0.5),
+            "evidence_ids": parsed.get("evidence_ids", []),
+            "reasoning": parsed.get("reasoning", ""),
+            "evidence_blocks": [
+                {"id": i+1, "page": metas[i].get("page", "?"), "text": docs[i][:500]}
+                for i in range(len(docs))
+            ]
+        }
+        
+        yield f'data: {json.dumps({"phase": "complete", "data": result})}\n\n'
+    
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+    })
 
 class SearchRequest(BaseModel):
     query: str
