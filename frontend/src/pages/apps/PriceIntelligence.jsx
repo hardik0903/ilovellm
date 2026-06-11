@@ -46,20 +46,23 @@ export function PriceIntelligence() {
   };
 
   return (
-    <div className="max-w-[1400px] mx-auto py-12 px-8 font-sans">
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white text-gray-800 p-8 font-sans">
+      <div className="max-w-[1400px] mx-auto">
       
-      {/* Header Area */}
-      <div className="text-center mb-10">
-        <div className="flex justify-center mb-4">
-          <div className="p-4 bg-blue-50 rounded-full">
-            <ShoppingCart size={48} className="text-blue-700" />
+        {/* Header Area */}
+        <div className="flex items-center gap-4 mb-8 border-b pb-6">
+          <div className="p-4 bg-blue-600 rounded-xl shadow-lg shadow-blue-200">
+            <ShoppingCart size={32} className="text-white" />
+          </div>
+          <div>
+            <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-indigo-600">
+              E-Commerce Price Intelligence
+            </h1>
+            <p className="text-gray-500 mt-2 font-medium">
+              Real-time competitor tracking • Entity resolution • Autonomous anomaly detection
+            </p>
           </div>
         </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Price Intelligence</h1>
-        <p className="text-lg text-gray-500 max-w-2xl mx-auto">
-          Real-time competitor tracking, entity resolution, and autonomous anomaly detection.
-        </p>
-      </div>
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
@@ -140,6 +143,7 @@ export function PriceIntelligence() {
           
         </div>
         
+      </div>
       </div>
     </div>
   );

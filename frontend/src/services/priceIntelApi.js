@@ -15,8 +15,8 @@ export const priceIntelApi = {
     const res = await axios.get(`${API_BASE}/products/${id}`);
     return res.data;
   },
-  createProduct: async (data) => {
-    const res = await axios.post(`${API_BASE}/track`, { source_url: data.name });
+  createProduct: async (url) => {
+    const res = await axios.post(`${API_BASE}/track`, { source_url: url });
     return res.data;
   },
   trackSource: async (productId, url) => {
