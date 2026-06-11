@@ -12,6 +12,21 @@ import uuid
 import io
 import pdfplumber
 import re
+import os
+
+import re
+import tempfile
+
+def clean_pdf_text(text: str) -> str:
+    # fix hyphenated line breaks: "configu-\nration" → "configuration"
+    text = re.sub(r'(\w+)-\n(\w)', r'\1\2', text)
+    # merge orphan single line breaks into paragraphs
+    text = re.sub(r'(?<!\n)\n(?!\n)', ' ', text)
+    # fix number-text collisions from column merging: "1)Title" → "1) Title"
+    text = re.sub(r'(\d+\))([A-Za-z])', r'\1 \2', text)
+    # fix stuck CamelCase words from column merging: "keyFindings" → "key Findings"
+    text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+    return text.strip()
 
 def normalize_arxiv_url(url: str) -> str:
     """Convert arXiv abstract URLs to PDF URLs.
@@ -204,12 +219,29 @@ async def scrape_static(url: str, force_refresh: bool = False, ignore_robots: bo
                 
                 extracted_text = []
                 page_map = []
-                with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-                    for i, page in enumerate(pdf.pages):
-                        text = page.extract_text()
-                        if text:
-                            extracted_text.append(text)
-                            page_map.append({"page": i + 1, "text": text})
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    tmp.write(resp.content)
+                    tmp_path = tmp.name
+                    
+                try:
+                    import pymupdf4llm
+                    md_text = pymupdf4llm.to_markdown(tmp_path)
+                    cleaned_text = clean_pdf_text(md_text)
+                    extracted_text = [cleaned_text]
+                    page_map = [{"page": 1, "text": cleaned_text}]
+                except Exception as e:
+                    print(f"pymupdf4llm failed: {e}. Falling back to pdfplumber.")
+                    with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+                        for i, page in enumerate(pdf.pages):
+                            text = page.extract_text()
+                            if text:
+                                cleaned_text = clean_pdf_text(text)
+                                extracted_text.append(cleaned_text)
+                                page_map.append({"page": i + 1, "text": cleaned_text})
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
                             
                 structured_data = {
                     "title": url.split("/")[-1],

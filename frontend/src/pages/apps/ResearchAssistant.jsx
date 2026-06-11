@@ -46,7 +46,7 @@ const ResearchAssistant = () => {
         const file = new File([scrapeData.data.extracted_text || scrapeData.data.context.map(c => c.text).join('\n') || "Empty Document"], 'url.txt', { type: 'text/plain' });
         formData.append('file', file);
       }
-      formData.append('chunking_strategy', 'recursive_overlap');
+      formData.append('chunking_strategy', 'semantic');
       
       const ingestRes = await fetch('http://localhost:8000/api/ingest-advanced', {
         method: 'POST',
@@ -293,12 +293,28 @@ const ResearchAssistant = () => {
                 {msg.streaming && msg.phase && renderPhaseIndicator(msg.phase)}
                 
                 {/* Answer text */}
-                {msg.content && (
+                {msg.content && !msg.structured?.parse_error && msg.structured?.found_in_paper !== false && (
                   <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>{msg.content}</p>
                 )}
                 
+                {/* Parse Error state */}
+                {msg.structured?.parse_error && (
+                  <div style={{ padding: '1rem', backgroundColor: '#fed7d7', color: '#c53030', borderRadius: '8px' }}>
+                    <strong>Could not parse model response</strong>
+                    <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', opacity: 0.8 }}>{msg.content}</p>
+                  </div>
+                )}
+                
+                {/* Not found state */}
+                {msg.structured?.found_in_paper === false && (
+                  <div style={{ padding: '1rem', backgroundColor: '#edf2f7', color: '#4a5568', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertTriangle size={18} color="#718096" />
+                    <strong>Not found in this paper</strong>
+                  </div>
+                )}
+
                 {/* Structured response UI */}
-                {msg.structured && (
+                {msg.structured && !msg.structured.parse_error && msg.structured.found_in_paper !== false && (
                   <div style={{ marginTop: '1rem' }}>
                     {/* Confidence meter */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', padding: '0.5rem 0.75rem', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
@@ -312,49 +328,13 @@ const ResearchAssistant = () => {
                       </span>
                     </div>
                     
-                    {/* Evidence blocks */}
-                    {msg.structured.evidence_blocks && msg.structured.evidence_blocks.length > 0 && (
+                    {/* Page citations */}
+                    {msg.structured.relevant_pages && msg.structured.relevant_pages.length > 0 && (
                       <div style={{ marginTop: '0.75rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: '#4a5568', fontSize: '0.85rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#4a5568', fontSize: '0.85rem' }}>
                           <BookOpen size={14} />
-                          <strong>Evidence Sources ({msg.structured.evidence_blocks.length} chunks)</strong>
+                          <strong>Pages: {msg.structured.relevant_pages.join(', ')}</strong>
                         </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          {msg.structured.evidence_blocks.map((block) => (
-                            <div key={block.id} title={block.text} style={{
-                              padding: '0.25rem 0.75rem',
-                              backgroundColor: (msg.structured.evidence_ids || []).includes(block.id) ? '#ebf8ff' : '#f7fafc',
-                              border: `1px solid ${(msg.structured.evidence_ids || []).includes(block.id) ? '#63b3ed' : '#e2e8f0'}`,
-                              borderRadius: '20px',
-                              fontSize: '0.75rem',
-                              color: '#4a5568',
-                              cursor: 'pointer',
-                              fontWeight: (msg.structured.evidence_ids || []).includes(block.id) ? 'bold' : 'normal'
-                            }}>
-                              [{block.id}] Page {block.page}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Reasoning */}
-                    {msg.structured.reasoning && (
-                      <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.75rem', backgroundColor: '#f0fff4', borderRadius: '6px', fontSize: '0.8rem', color: '#276749', borderLeft: '3px solid #48bb78' }}>
-                        <strong>Reasoning:</strong> {msg.structured.reasoning}
-                      </div>
-                    )}
-                    
-                    {/* Faithfulness warnings */}
-                    {msg.structured.faithfulness_flags && msg.structured.faithfulness_flags.length > 0 && (
-                      <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.75rem', backgroundColor: '#fffff0', borderRadius: '6px', fontSize: '0.8rem', color: '#975a16', borderLeft: '3px solid #ecc94b' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.25rem' }}>
-                          <AlertTriangle size={14} />
-                          <strong>Low grounding detected in:</strong>
-                        </div>
-                        {msg.structured.faithfulness_flags.map((flag, fi) => (
-                          <div key={fi} style={{ marginLeft: '1.25rem', fontStyle: 'italic' }}>• "{flag}"</div>
-                        ))}
                       </div>
                     )}
                   </div>

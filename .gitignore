@@ -24,7 +24,9 @@ synthetic_data.csv
 *.sqlite3
 *.db
 chroma_storage/
+bm25_cache/
 *.txt
+!requirements.txt
 *.bin
 
 # Logs

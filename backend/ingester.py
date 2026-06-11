@@ -6,7 +6,10 @@ from PIL import Image
 import pandas as pd
 import docx
 from bs4 import BeautifulSoup
-import whisper
+try:
+    import whisper
+except ImportError:
+    whisper = None
 import yt_dlp
 import mailparser
 import os
@@ -17,6 +20,8 @@ import uuid
 _whisper_models = {}
 
 def get_whisper_model(model_name="base"):
+    if not whisper:
+        raise ImportError("whisper and torch are not installed. Audio ingestion disabled.")
     if model_name not in _whisper_models:
         print(f"Loading Whisper model {model_name}...")
         _whisper_models[model_name] = whisper.load_model(model_name)
@@ -25,9 +30,12 @@ def get_whisper_model(model_name="base"):
 def clear_whisper_cache():
     global _whisper_models
     _whisper_models.clear()
-    import torch
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 def parse_pdf_text(content: bytes):
     extracted_text = []

@@ -4,6 +4,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+load_dotenv()
 from typing import List, Optional, Dict
 import fitz  # PyMuPDF
 import pdfplumber
@@ -568,148 +571,131 @@ def _format_numbered_evidence(docs, metas):
     blocks = []
     for i, (doc, meta) in enumerate(zip(docs, metas)):
         page = meta.get("page", "?")
-        truncated = doc[:1200]
+        truncated = doc[:1500]
         blocks.append(f'[{i+1}] Page {page}: "{truncated}"')
     return "\n\n".join(blocks)
 
 SYNTHESIS_PROMPT = """You are a research paper analyst. Answer ONLY from the numbered evidence passages below.
-If the answer is not in the passages, reply with {{"answer": "Not found in the paper.", "confidence": 0.0, "evidence_ids": []}}.
+If the answer is not in the passages, reply with this exact JSON and nothing else:
+{{
+  "answer": "Not found in the paper.",
+  "evidence": [],
+  "confidence": 0.0,
+  "found_in_paper": false,
+  "relevant_pages": []
+}}
 
 Evidence:
 {evidence}
 
 Question: {question}
 
-Reply with ONLY valid JSON in this exact format:
-{{"answer": "...", "confidence": 0.8, "evidence_ids": [1, 2], "reasoning": "..."}}
-JSON:"""
+Reply with ONLY valid JSON in this exact format, with no markdown fences or other text:
+{{
+  "answer": "complete answer here",
+  "evidence": ["direct quote or paraphrase from text"],
+  "confidence": 0.8,
+  "found_in_paper": true,
+  "relevant_pages": [1, 2]
+}}"""
+
+def _parse_groq_json(raw_output: str) -> dict:
+    import json
+    import re
+    try:
+        return json.loads(raw_output)
+    except Exception:
+        # Fallback: strip markdown fences
+        try:
+            stripped = re.sub(r'^```json\s*', '', raw_output.strip(), flags=re.IGNORECASE)
+            stripped = re.sub(r'\s*```$', '', stripped)
+            return json.loads(stripped)
+        except Exception:
+            return {
+                "parse_error": True,
+                "answer": raw_output,
+                "confidence": 0.0,
+                "found_in_paper": False,
+                "relevant_pages": [],
+                "evidence": []
+            }
 
 @app.post("/api/research/query")
 async def research_query(req: ResearchQueryRequest):
-    from inference_manager import run_inference
+    from inference_manager import run_inference, GROQ_GAP_CHECK_MODEL, GROQ_SYNTHESIS_MODEL
     
-    # 1. Hybrid Retrieval (BM25 + Dense + RRF)
-    docs, metas, needs_second_pass = hybrid_retrieve(req.query, req.document_id, top_k=6)
+    docs, metas, _ = hybrid_retrieve(req.query, req.document_id, top_k=8)
     
-    # 2. Deterministic gap-check via cosine distance threshold
+    evidence_text = _format_numbered_evidence(docs, metas)
+    gap_prompt = f"Query: {req.query}\n\nEvidence:\n{evidence_text}\n\nDo you have enough evidence to answer? Reply ONLY 'YES' or 'NO: <missing search terms>'."
+    gap_check = await run_inference(
+        artifact_id="base", input_data=gap_prompt, 
+        base_model_id=GROQ_GAP_CHECK_MODEL, max_tokens=150
+    )
+    gap_text = gap_check["output"].strip()
+    
     interrogation_passes = 1
-    if needs_second_pass:
-        # Run a second retrieval pass with a rephrased query
-        rephrase_prompt = f"Rephrase this question using different keywords: {req.query}\nRephrased:"
-        rephrase_res = await run_inference(
-            artifact_id="base", input_data=rephrase_prompt,
-            is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=40
-        )
-        rephrased = rephrase_res["output"].strip()
-        if rephrased and len(rephrased) > 5:
-            extra_docs, extra_metas, _ = hybrid_retrieve(rephrased, req.document_id, top_k=3)
+    if gap_text.upper().startswith("NO"):
+        missing_query = gap_text[3:].strip()
+        if missing_query:
+            extra_docs, extra_metas, _ = hybrid_retrieve(missing_query, req.document_id, top_k=4)
             existing = set(docs)
             for d, m in zip(extra_docs, extra_metas):
-                if d not in existing and len(docs) < 8:
+                if d not in existing and len(docs) < 12:
                     docs.append(d)
                     metas.append(m)
                     existing.add(d)
             interrogation_passes = 2
-    
-    # 3. Token budget hard cap
-    docs = trim_to_token_budget(docs, max_chars=4000)
-    metas = metas[:len(docs)]
-    
-    # 4. Synthesize with numbered evidence + JSON prompt
+            
+    # Re-format evidence with up to 12 chunks
     evidence_text = _format_numbered_evidence(docs, metas)
     syn_prompt = SYNTHESIS_PROMPT.format(evidence=evidence_text, question=req.query)
     
     syn_res = await run_inference(
         artifact_id="base", input_data=syn_prompt,
-        is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=300
+        base_model_id=GROQ_SYNTHESIS_MODEL, max_tokens=1024
     )
     raw_output = syn_res["output"]
-    
-    # 5. Parse JSON response with robust fallback
-    parsed = None
-    try:
-        # Try to find JSON in the output
-        json_match = re.search(r'\{[^{}]*"answer"[^{}]*\}', raw_output, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group(0))
-        else:
-            parsed = json.loads(raw_output)
-    except Exception:
-        # Fallback: extract answer text and wrap in schema
-        answer_match = re.search(r'ANSWER:\s*(.*?)(?:EVIDENCE:|$)', raw_output, re.DOTALL | re.IGNORECASE)
-        ans_text = answer_match.group(1).strip() if answer_match else raw_output.strip()
-        parsed = {
-            "answer": ans_text,
-            "confidence": 0.0,
-            "evidence_ids": [],
-            "reasoning": "Failed to parse structured output."
-        }
-    
-    # Normalize output schema
-    result = {
-        "answer": parsed.get("answer", raw_output.strip()),
-        "confidence": parsed.get("confidence", 0.5),
-        "evidence_ids": parsed.get("evidence_ids", []),
-        "reasoning": parsed.get("reasoning", ""),
-        "evidence_blocks": [
-            {"id": i+1, "page": metas[i].get("page", "?"), "text": docs[i][:500]}
-            for i in range(len(docs))
-        ]
-    }
-    
-    # 6. Faithfulness check — flag sentences not grounded in evidence
-    answer_sentences = [s.strip() for s in result["answer"].split(".") if s.strip()]
-    flagged = []
-    evidence_text_lower = " ".join(docs).lower()
-    for sent in answer_sentences:
-        # Check if key words from the sentence appear in evidence
-        words = [w.lower() for w in sent.split() if len(w) > 3]
-        if words:
-            overlap = sum(1 for w in words if w in evidence_text_lower) / len(words)
-            if overlap < 0.3:
-                flagged.append(sent)
-    result["faithfulness_flags"] = flagged
+    parsed = _parse_groq_json(raw_output)
     
     return {
         "success": True,
-        "data": result,
+        "data": parsed,
         "interrogation_passes": interrogation_passes,
         "metrics": syn_res.get("metrics", {})
     }
 
 @app.post("/api/research/query/stream")
 async def research_query_stream(req: ResearchQueryRequest):
-    """SSE streaming endpoint for research queries."""
-    from inference_manager import run_inference
+    from inference_manager import run_inference, GROQ_GAP_CHECK_MODEL, GROQ_SYNTHESIS_MODEL
     import asyncio
+    import json
     
     async def event_stream():
-        # Phase 1: Retrieval
         yield f'data: {{"phase": "retrieving"}}\n\n'
         
-        docs, metas, needs_second_pass = hybrid_retrieve(req.query, req.document_id, top_k=6)
+        docs, metas, _ = hybrid_retrieve(req.query, req.document_id, top_k=8)
         
-        if needs_second_pass:
+        evidence_text = _format_numbered_evidence(docs, metas)
+        gap_prompt = f"Query: {req.query}\n\nEvidence:\n{evidence_text}\n\nDo you have enough evidence to answer? Reply ONLY 'YES' or 'NO: <missing search terms>'."
+        gap_check = await run_inference(
+            artifact_id="base", input_data=gap_prompt, 
+            base_model_id=GROQ_GAP_CHECK_MODEL, max_tokens=150
+        )
+        gap_text = gap_check["output"].strip()
+        
+        if gap_text.upper().startswith("NO"):
             yield f'data: {{"phase": "second_pass"}}\n\n'
-            rephrase_prompt = f"Rephrase this question using different keywords: {req.query}\nRephrased:"
-            rephrase_res = await run_inference(
-                artifact_id="base", input_data=rephrase_prompt,
-                is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=40
-            )
-            rephrased = rephrase_res["output"].strip()
-            if rephrased and len(rephrased) > 5:
-                extra_docs, extra_metas, _ = hybrid_retrieve(rephrased, req.document_id, top_k=3)
+            missing_query = gap_text[3:].strip()
+            if missing_query:
+                extra_docs, extra_metas, _ = hybrid_retrieve(missing_query, req.document_id, top_k=4)
                 existing = set(docs)
                 for d, m in zip(extra_docs, extra_metas):
-                    if d not in existing and len(docs) < 8:
+                    if d not in existing and len(docs) < 12:
                         docs.append(d)
                         metas.append(m)
                         existing.add(d)
         
-        docs = trim_to_token_budget(docs, max_chars=4000)
-        metas = metas[:len(docs)]
-        
-        # Phase 2: Synthesis
         yield f'data: {{"phase": "generating"}}\n\n'
         
         evidence_text = _format_numbered_evidence(docs, metas)
@@ -717,34 +703,14 @@ async def research_query_stream(req: ResearchQueryRequest):
         
         syn_res = await run_inference(
             artifact_id="base", input_data=syn_prompt,
-            is_base_model=True, base_model_id="Qwen/Qwen2.5-0.5B-Instruct", max_tokens=300
+            base_model_id=GROQ_SYNTHESIS_MODEL, max_tokens=1024
         )
         raw_output = syn_res["output"]
+        parsed = _parse_groq_json(raw_output)
         
-        # Parse and stream result
-        parsed = None
-        try:
-            json_match = re.search(r'\{[^{}]*"answer"[^{}]*\}', raw_output, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group(0))
-            else:
-                parsed = json.loads(raw_output)
-        except Exception:
-            parsed = {"answer": raw_output.strip(), "confidence": 0.0, "evidence_ids": [], "reasoning": ""}
+        yield f'data: {json.dumps({"phase": "complete", "data": parsed})}\n\n'
         
-        result = {
-            "answer": parsed.get("answer", raw_output.strip()),
-            "confidence": parsed.get("confidence", 0.5),
-            "evidence_ids": parsed.get("evidence_ids", []),
-            "reasoning": parsed.get("reasoning", ""),
-            "evidence_blocks": [
-                {"id": i+1, "page": metas[i].get("page", "?"), "text": docs[i][:500]}
-                for i in range(len(docs))
-            ]
-        }
-        
-        yield f'data: {json.dumps({"phase": "complete", "data": result})}\n\n'
-    
+    from fastapi.responses import StreamingResponse
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
