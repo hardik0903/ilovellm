@@ -23,17 +23,17 @@ export function ProductForm({ onProductAdded }) {
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-      <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-        <Link size={24} className="text-blue-600" />
+    <div style={{ backgroundColor: '#fff', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
+      <h3 style={{ fontSize: '1.25rem', color: '#2d3748', fontWeight: 'bold', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <Link size={24} color="#304fba" />
         Track New Asset
       </h3>
       
-      <form onSubmit={handleSubmit} className="flex gap-4 flex-wrap">
+      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
         <input 
           type="url" 
           placeholder="Paste Amazon, Flipkart, or Myntra URL here..." 
-          className="flex-1 p-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+          style={{ flex: 1, padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e0', fontSize: '1rem', outline: 'none' }}
           value={url}
           onChange={e => setUrl(e.target.value)}
           disabled={loading}
@@ -43,9 +43,19 @@ export function ProductForm({ onProductAdded }) {
         <button 
           type="submit" 
           disabled={loading || !url}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white transition-colors ${
-            (loading || !url) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-          }`}
+          style={{ 
+            backgroundColor: (loading || !url) ? '#a0aec0' : '#304fba', 
+            color: 'white', 
+            padding: '0 2rem', 
+            borderRadius: '8px', 
+            fontWeight: 'bold', 
+            border: 'none', 
+            cursor: (loading || !url) ? 'not-allowed' : 'pointer', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem',
+            transition: 'background-color 0.2s'
+          }}
         >
           {loading ? <Loader size={20} className="animate-spin" /> : <Plus size={20} />}
           {loading ? 'Initializing...' : 'Deploy Tracker'}

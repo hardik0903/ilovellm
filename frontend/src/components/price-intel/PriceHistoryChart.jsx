@@ -45,8 +45,8 @@ export function PriceHistoryChart({ data }) {
 
   if (chartData.length === 0) {
     return (
-      <div className="h-[250px] flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-300">
-        <p className="text-gray-500 text-sm font-medium">Waiting for telemetry data...</p>
+      <div style={{ height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px dashed #cbd5e0' }}>
+        <p style={{ color: '#a0aec0', fontSize: '0.875rem', fontWeight: '500' }}>Waiting for telemetry data...</p>
       </div>
     );
   }
@@ -57,18 +57,18 @@ export function PriceHistoryChart({ data }) {
     if (active && payload && payload.length) {
       const dataPoint = payload[0].payload;
       return (
-        <div className="bg-gray-800 text-white p-3 rounded shadow-lg text-sm border-none">
-          <p className="font-bold mb-2">{label}</p>
+        <div style={{ backgroundColor: '#2d3748', color: 'white', padding: '0.75rem', borderRadius: '8px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '0.875rem', border: 'none' }}>
+          <p style={{ fontWeight: 'bold', marginBottom: '0.5rem', margin: 0 }}>{label}</p>
           {payload.map((entry, index) => (
-            <div key={`item-${index}`} className="flex justify-between gap-4 mb-1" style={{ color: entry.color }}>
-              <span className="capitalize">{entry.name}:</span>
-              <span className="font-bold">₹{entry.value.toLocaleString()}</span>
+            <div key={`item-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.25rem', color: entry.color }}>
+              <span style={{ textTransform: 'capitalize' }}>{entry.name}:</span>
+              <span style={{ fontWeight: 'bold' }}>₹{entry.value.toLocaleString()}</span>
             </div>
           ))}
           {viewMode === 'compare' && dataPoint._trigger_source && (
-            <div className="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-300">
-              <div className="capitalize text-gray-400">Latest Event ({dataPoint._trigger_source})</div>
-              <div>Seller: {dataPoint._seller || 'Unknown'}</div>
+            <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #4a5568', fontSize: '0.75rem', color: '#e2e8f0' }}>
+              <div style={{ textTransform: 'capitalize', color: '#a0aec0', marginBottom: '0.25rem' }}>Latest Event ({dataPoint._trigger_source})</div>
+              <div style={{ marginBottom: '0.125rem' }}>Seller: {dataPoint._seller || 'Unknown'}</div>
               <div>Stock: {dataPoint._stock ? dataPoint._stock.replace('_', ' ') : 'Unknown'}</div>
             </div>
           )}
@@ -79,18 +79,28 @@ export function PriceHistoryChart({ data }) {
   };
 
   return (
-    <div className="w-full flex flex-col gap-4">
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* Controls Bar */}
-      <div className="flex justify-between items-center bg-white p-2 rounded-lg border shadow-sm">
-        <div className="flex bg-gray-100 p-1 rounded-md">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: '0.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
+        <div style={{ display: 'flex', backgroundColor: '#f8f9fa', padding: '0.25rem', borderRadius: '6px' }}>
           <button 
-            className={`px-3 py-1 text-xs font-semibold rounded ${viewMode === 'aggregate' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+            style={{ 
+              padding: '0.25rem 0.75rem', fontSize: '0.75rem', fontWeight: '600', borderRadius: '4px', border: 'none', cursor: 'pointer',
+              backgroundColor: viewMode === 'aggregate' ? '#fff' : 'transparent', 
+              color: viewMode === 'aggregate' ? '#2b6cb0' : '#718096', 
+              boxShadow: viewMode === 'aggregate' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none' 
+            }}
             onClick={() => setViewMode('aggregate')}
           >
             Canonical Trend
           </button>
           <button 
-            className={`px-3 py-1 text-xs font-semibold rounded ${viewMode === 'compare' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+            style={{ 
+              padding: '0.25rem 0.75rem', fontSize: '0.75rem', fontWeight: '600', borderRadius: '4px', border: 'none', cursor: 'pointer',
+              backgroundColor: viewMode === 'compare' ? '#fff' : 'transparent', 
+              color: viewMode === 'compare' ? '#2b6cb0' : '#718096', 
+              boxShadow: viewMode === 'compare' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none' 
+            }}
             onClick={() => setViewMode('compare')}
           >
             Compare Marketplaces
@@ -98,10 +108,10 @@ export function PriceHistoryChart({ data }) {
         </div>
         
         {viewMode === 'compare' && (
-          <div className="flex items-center gap-2 text-xs text-gray-600">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: '#718096' }}>
             <Filter size={14} />
             <select 
-              className="bg-transparent border-none outline-none cursor-pointer font-medium"
+              style={{ backgroundColor: 'transparent', border: 'none', outline: 'none', cursor: 'pointer', fontWeight: '500', color: '#4a5568' }}
               value={selectedSource}
               onChange={(e) => setSelectedSource(e.target.value)}
             >
@@ -112,7 +122,7 @@ export function PriceHistoryChart({ data }) {
         )}
       </div>
 
-      <div className="h-[250px] w-full">
+      <div style={{ height: '250px', width: '100%' }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />

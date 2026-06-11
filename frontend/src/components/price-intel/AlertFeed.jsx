@@ -33,49 +33,51 @@ export function AlertFeed() {
   };
 
   const getSeverityStyles = (severity) => {
-    if (severity === 'high') return { bg: 'bg-red-50', text: 'text-red-800', border: 'border-red-200', icon: <AlertTriangle size={18} className="text-red-500" /> };
-    if (severity === 'medium') return { bg: 'bg-yellow-50', text: 'text-yellow-800', border: 'border-yellow-200', icon: <Info size={18} className="text-yellow-500" /> };
-    return { bg: 'bg-blue-50', text: 'text-blue-800', border: 'border-blue-200', icon: <Info size={18} className="text-blue-500" /> };
+    if (severity === 'high') return { bg: '#fff5f5', text: '#9b2c2c', border: '#fed7d7', icon: <AlertTriangle size={18} color="#f56565" /> };
+    if (severity === 'medium') return { bg: '#fffff0', text: '#975a16', border: '#fefcbf', icon: <Info size={18} color="#ecc94b" /> };
+    return { bg: '#ebf8ff', text: '#2c5282', border: '#bee3f8', icon: <Info size={18} color="#4299e1" /> };
   };
 
   if (loading && alerts.length === 0) {
-    return <div className="text-sm text-gray-500 italic p-4">Loading alerts...</div>;
+    return <div style={{ fontSize: '0.875rem', color: '#a0aec0', fontStyle: 'italic', padding: '1rem' }}>Loading alerts...</div>;
   }
 
   if (alerts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center p-6 text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-200">
-        <Bell size={24} className="mb-2 opacity-50" />
-        <p className="text-sm font-medium">All caught up!</p>
-        <p className="text-xs">No active price drops or scrape issues.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', color: '#a0aec0', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px dashed #e2e8f0' }}>
+        <Bell size={24} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+        <p style={{ fontSize: '0.875rem', fontWeight: '500', margin: 0 }}>All caught up!</p>
+        <p style={{ fontSize: '0.75rem', margin: 0 }}>No active price drops or scrape issues.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
       {alerts.map(alert => {
         const styles = getSeverityStyles(alert.severity);
         return (
-          <div key={alert.id} className={`flex items-start p-3 rounded-lg border shadow-sm ${styles.bg} ${styles.border}`}>
-            <div className="mr-3 mt-0.5">
+          <div key={alert.id} style={{ display: 'flex', alignItems: 'flex-start', padding: '0.75rem', borderRadius: '8px', border: `1px solid ${styles.border}`, backgroundColor: styles.bg, boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
+            <div style={{ marginRight: '0.75rem', marginTop: '0.125rem' }}>
               {styles.icon}
             </div>
-            <div className="flex-1">
-              <div className={`text-sm font-semibold ${styles.text}`}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: '600', color: styles.text }}>
                 {alert.rule_trigger_source.replace(/_/g, ' ').toUpperCase()}
               </div>
-              <div className="text-sm text-gray-700 mt-1">
+              <div style={{ fontSize: '0.875rem', color: '#4a5568', marginTop: '0.25rem' }}>
                 {alert.message}
               </div>
-              <div className="text-xs text-gray-500 mt-2">
+              <div style={{ fontSize: '0.75rem', color: '#718096', marginTop: '0.5rem' }}>
                 {new Date(alert.created_at).toLocaleString()}
               </div>
             </div>
             <button 
               onClick={() => handleResolve(alert.id)}
-              className="p-1 rounded-full hover:bg-black/5 text-gray-400 hover:text-gray-700 transition-colors"
+              style={{ padding: '0.25rem', borderRadius: '9999px', background: 'none', border: 'none', color: '#a0aec0', cursor: 'pointer', transition: 'color 0.2s' }}
               title="Mark as Read"
+              onMouseOver={(e) => e.currentTarget.style.color = '#4a5568'}
+              onMouseOut={(e) => e.currentTarget.style.color = '#a0aec0'}
             >
               <CheckCircle size={18} />
             </button>

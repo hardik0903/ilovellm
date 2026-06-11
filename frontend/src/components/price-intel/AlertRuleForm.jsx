@@ -46,15 +46,15 @@ export function AlertRuleForm({ productId, onRuleAdded }) {
   };
 
   return (
-    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-      <h3 className="text-lg font-bold text-gray-800 mb-4">Active Rules</h3>
+    <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
+      <h3 style={{ fontSize: '1.125rem', fontWeight: 'bold', color: '#2d3748', marginBottom: '1rem' }}>Active Rules</h3>
       
       {rules.length > 0 ? (
-        <ul className="mb-6 space-y-2">
+        <ul style={{ marginBottom: '1.5rem', listStyleType: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {rules.map(r => (
-            <li key={r.id} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded border border-gray-100">
-              <span className="font-medium text-gray-700 uppercase">{r.rule_type.replace('_', ' ')}</span>
-              <span className="text-gray-500">
+            <li key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem', padding: '0.5rem', backgroundColor: '#f8f9fa', borderRadius: '4px', border: '1px solid #f7fafc' }}>
+              <span style={{ fontWeight: '500', color: '#4a5568', textTransform: 'uppercase' }}>{r.rule_type.replace('_', ' ')}</span>
+              <span style={{ color: '#a0aec0' }}>
                 {r.threshold_percent ? `>${r.threshold_percent}% ` : ''}
                 {r.threshold_value ? `>₹${r.threshold_value} ` : ''}
                 {r.consecutive_count > 1 ? `(${r.consecutive_count}x) ` : ''}
@@ -63,13 +63,13 @@ export function AlertRuleForm({ productId, onRuleAdded }) {
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-gray-500 italic mb-4">No specific rules set for this product.</p>
+        <p style={{ fontSize: '0.875rem', color: '#a0aec0', fontStyle: 'italic', marginBottom: '1rem' }}>No specific rules set for this product.</p>
       )}
 
-      <h4 className="text-sm font-bold text-gray-700 mb-3 border-t pt-4">Add New Rule</h4>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <h4 style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#4a5568', marginBottom: '0.75rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>Add New Rule</h4>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         <select 
-          className="p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          style={{ padding: '0.5rem', border: '1px solid #cbd5e0', borderRadius: '4px', fontSize: '0.875rem', outline: 'none' }}
           value={ruleType} 
           onChange={e => setRuleType(e.target.value)}
         >
@@ -79,18 +79,18 @@ export function AlertRuleForm({ productId, onRuleAdded }) {
         </select>
         
         {ruleType === 'price_drop' && (
-          <div className="flex gap-2">
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
             <input 
               type="number" 
               placeholder="% Drop (e.g. 15)" 
-              className="p-2 border rounded text-sm w-1/2"
+              style={{ padding: '0.5rem', border: '1px solid #cbd5e0', borderRadius: '4px', fontSize: '0.875rem', width: '50%', outline: 'none' }}
               value={thresholdPercent}
               onChange={e => setThresholdPercent(e.target.value)}
             />
             <input 
               type="number" 
               placeholder="Absolute ₹ (e.g. 500)" 
-              className="p-2 border rounded text-sm w-1/2"
+              style={{ padding: '0.5rem', border: '1px solid #cbd5e0', borderRadius: '4px', fontSize: '0.875rem', width: '50%', outline: 'none' }}
               value={thresholdValue}
               onChange={e => setThresholdValue(e.target.value)}
             />
@@ -101,7 +101,7 @@ export function AlertRuleForm({ productId, onRuleAdded }) {
           <input 
             type="number" 
             placeholder="Consecutive Fails (e.g. 3)" 
-            className="p-2 border rounded text-sm"
+            style={{ padding: '0.5rem', border: '1px solid #cbd5e0', borderRadius: '4px', fontSize: '0.875rem', outline: 'none' }}
             value={consecutiveCount}
             onChange={e => setConsecutiveCount(parseInt(e.target.value))}
           />
@@ -110,7 +110,7 @@ export function AlertRuleForm({ productId, onRuleAdded }) {
         <button 
           type="submit" 
           disabled={loading}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded text-sm transition-colors mt-2"
+          style={{ backgroundColor: '#3182ce', color: 'white', fontWeight: '600', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '0.875rem', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', marginTop: '0.5rem' }}
         >
           {loading ? 'Saving...' : '+ Add Rule'}
         </button>
