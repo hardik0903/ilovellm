@@ -98,3 +98,37 @@ def debug_listing(listing_id: int, db: Session = Depends(get_db)):
         "latest_attempt": latest_attempt,
         "latest_event": latest_event
     }
+
+from .models import AlertRule, Alert
+from .schemas import AlertRuleCreate, AlertRuleSchema, AlertSchema
+
+@router.post("/rules", response_model=AlertRuleSchema)
+def create_rule(rule: AlertRuleCreate, db: Session = Depends(get_db)):
+    db_rule = AlertRule(**rule.model_dump())
+    db.add(db_rule)
+    db.commit()
+    db.refresh(db_rule)
+    return db_rule
+
+@router.get("/rules/{product_id}", response_model=List[AlertRuleSchema])
+def get_rules(product_id: int, db: Session = Depends(get_db)):
+    return db.query(AlertRule).filter(
+        (AlertRule.product_id == product_id) | (AlertRule.rule_scope == "global_monitoring")
+    ).all()
+
+@router.get("/alerts", response_model=List[AlertSchema])
+def get_alerts(db: Session = Depends(get_db)):
+    return db.query(Alert).filter(Alert.status == "unread").order_by(Alert.created_at.desc()).all()
+
+class AlertResolve(BaseModel):
+    alert_ids: List[int]
+
+@router.post("/alerts/seen")
+def resolve_alerts(payload: AlertResolve, db: Session = Depends(get_db)):
+    alerts = db.query(Alert).filter(Alert.id.in_(payload.alert_ids)).all()
+    for alert in alerts:
+        alert.status = "resolved"
+        from datetime import datetime
+        alert.resolved_at = datetime.utcnow()
+    db.commit()
+    return {"status": "success"}

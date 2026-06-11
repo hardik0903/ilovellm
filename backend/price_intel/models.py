@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, JSON, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from price_intel.db import Base
@@ -109,3 +109,42 @@ class PriceEvent(Base):
 
     listing = relationship("SourceListing")
     product = relationship("Product")
+
+class AlertRule(Base):
+    __tablename__ = "alert_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=True) # None for global rules
+    
+    rule_scope = Column(String, default="product_specific") # global_monitoring or product_specific
+    rule_type = Column(String, index=True) # price_drop, scrape_failed, out_of_stock
+    
+    threshold_value = Column(Float, nullable=True)
+    threshold_percent = Column(Float, nullable=True)
+    consecutive_count = Column(Integer, default=1) # for scrape_failed (e.g. 3)
+    
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
+    listing_id = Column(Integer, ForeignKey("source_listings.id"), nullable=True)
+    event_id = Column(Integer, ForeignKey("price_events.id"), nullable=True)
+    rule_id = Column(Integer, ForeignKey("alert_rules.id"), nullable=True)
+    
+    rule_trigger_source = Column(String) # price_event, scrape_failure_consecutive, etc
+    message = Column(String)
+    severity = Column(String) # low, medium, high
+    
+    dedupe_hash = Column(String, index=True) # Hash to prevent duplicate alerts
+    status = Column(String, default="unread") # unread, resolved
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    
+    product = relationship("Product")
+    listing = relationship("SourceListing")
+    event = relationship("PriceEvent")

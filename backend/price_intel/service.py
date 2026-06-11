@@ -5,6 +5,7 @@ from .connectors import get_connector
 from .normalizer import normalize_listing
 from .matcher import find_best_product_match
 from .detector import detect_changes
+from .alerts import evaluate_event_for_alerts
 
 async def track_product_url(db: Session, url: str) -> int:
     """Creates a new tracked product from a URL with Entity Resolution."""
@@ -97,6 +98,8 @@ async def track_product_url(db: Session, url: str) -> int:
     events = detect_changes(db, listing.id)
     if events:
         db.add_all(events)
+        for event in events:
+            evaluate_event_for_alerts(db, event)
         db.commit()
     
     return product_id
@@ -143,6 +146,8 @@ async def run_scrape_for_listing(db: Session, listing: SourceListing):
     events = detect_changes(db, listing.id)
     if events:
         db.add_all(events)
+        for event in events:
+            evaluate_event_for_alerts(db, event)
         db.commit()
 
 async def refresh_all_tracked_products(db: Session):
